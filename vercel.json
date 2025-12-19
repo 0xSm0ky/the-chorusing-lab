@@ -1,0 +1,4 @@
+{
+  "buildCommand": "pnpm rebuild youtube-dl-exec && pnpm build",
+  "installCommand": "pnpm install"
+}
