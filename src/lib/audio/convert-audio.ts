@@ -215,7 +215,7 @@ export function needsConversion(filename: string, mimeType?: string): boolean {
   const ext = filename.split(".").pop()?.toLowerCase();
   const mp4Extensions = ["mp4", "m4v", "m4a"];
   return (
-    (ext && mp4Extensions.includes(ext)) ||
-    (mimeType && mimeType.includes("mp4"))
+    Boolean(ext && mp4Extensions.includes(ext)) ||
+    Boolean(mimeType && mimeType.includes("mp4"))
   );
 }
