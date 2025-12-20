@@ -122,19 +122,41 @@ export default function ClipCreatorPage() {
 
       const data = await response.json();
 
-      // Convert base64 audio to File object
-      const audioData = Uint8Array.from(atob(data.audio.data), (c) =>
-        c.charCodeAt(0)
-      );
-      const audioBlob = new Blob([audioData], { type: data.audio.mimeType });
-      const audioFile = new File([audioBlob], data.audio.filename, {
-        type: data.audio.mimeType,
+      // Validate response
+      if (!data.audio || !data.audio.data) {
+        throw new Error("Invalid response: missing audio data");
+      }
+
+      console.log("📥 YouTube download response:", {
+        filename: data.audio.filename,
+        mimeType: data.audio.mimeType,
+        size: data.audio.size,
+        dataLength: data.audio.data.length,
       });
 
-      setSelectedFile(audioFile);
-      // Store the YouTube URL as the source URL for extracted clips
-      setSourceUrl(data.videoInfo?.url || youtubeUrl.trim());
-      setFileError(null);
+      // Convert base64 audio to File object
+      try {
+        const audioData = Uint8Array.from(atob(data.audio.data), (c) =>
+          c.charCodeAt(0)
+        );
+        console.log("✅ Decoded audio data:", audioData.length, "bytes");
+        
+        const audioBlob = new Blob([audioData], { type: data.audio.mimeType });
+        console.log("✅ Created blob:", audioBlob.size, "bytes, type:", audioBlob.type);
+        
+        const audioFile = new File([audioBlob], data.audio.filename, {
+          type: data.audio.mimeType,
+        });
+        console.log("✅ Created file:", audioFile.name, audioFile.size, "bytes, type:", audioFile.type);
+
+        setSelectedFile(audioFile);
+        // Store the YouTube URL as the source URL for extracted clips
+        setSourceUrl(data.videoInfo?.url || youtubeUrl.trim());
+        setFileError(null);
+      } catch (decodeError) {
+        console.error("❌ Failed to decode audio data:", decodeError);
+        throw new Error(`Failed to decode audio: ${decodeError instanceof Error ? decodeError.message : "Unknown error"}`);
+      }
     } catch (error) {
       console.error("YouTube download error:", error);
       setFileError(

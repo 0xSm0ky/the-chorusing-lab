@@ -148,12 +148,23 @@ export function AudioEditor({ file, sourceUrl }: AudioEditorProps) {
           });
 
           testAudio.addEventListener("error", (e) => {
-            console.log("❌ AudioEditor: Test audio failed:", e);
+            const audioError = testAudio.error;
+            console.error("❌ AudioEditor: Test audio failed:", {
+              error: e,
+              audioError,
+              code: audioError?.code,
+              message: audioError?.message,
+              fileType: file.type,
+              fileName: file.name,
+              fileSize: file.size,
+            });
             clearTimeout(timeout);
-            reject(new Error("Test audio failed to load"));
+            const errorMsg = audioError?.message || "Test audio failed to load";
+            reject(new Error(`Audio loading error: ${errorMsg} (Code: ${audioError?.code || "unknown"})`));
           });
 
           testAudio.src = objectUrl;
+          console.log("🔗 AudioEditor: Set test audio src to:", objectUrl);
         });
 
         // Create WaveSurfer instance with regions plugin (HIGH QUALITY)
