@@ -34,6 +34,9 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
   const wsRef = useRef<any>(null);
   const regionsRef = useRef<any>(null);
   const mounted = useRef(true);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -99,6 +102,41 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
         _activeWs = ws;
         (waveformElement as any).__WS = ws; // dev-tool handle
 
+        // Try to set up gain node as early as possible - before audio is ready
+        // This needs to happen before WaveSurfer fully initializes the media element
+        ws.on("load", () => {
+          // This fires when audio starts loading
+          const backend = (ws as any).backend;
+          // Try multiple ways to access the media element
+          const mediaElement =
+            backend?.media ||
+            (ws as any).getMediaElement?.() ||
+            backend?.el ||
+            backend?.mediaElement;
+          if (mediaElement && !gainNodeRef.current) {
+            // Try to create gain node immediately when media element is available
+            try {
+              const audioContext = new (window.AudioContext ||
+                (window as any).webkitAudioContext)();
+              const source =
+                audioContext.createMediaElementSource(mediaElement);
+              const gainNode = audioContext.createGain();
+              gainNode.gain.value = 1.0;
+
+              source.connect(gainNode);
+              gainNode.connect(audioContext.destination);
+
+              audioContextRef.current = audioContext;
+              mediaSourceRef.current = source;
+              gainNodeRef.current = gainNode;
+
+              (mediaElement as any).__sourceNode = source;
+            } catch (err: any) {
+              console.warn("Early gain node creation failed:", err.message);
+            }
+          }
+        });
+
         ws.on("ready", () => {
           if (!mounted.current) return;
           const dur = ws.getDuration();
@@ -111,8 +149,56 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
             ws.setPlaybackRate(1.0);
             // If using MediaElement backend, set preservesPitch for tempo change
             const backend = (ws as any).backend;
-            if (backend?.media) {
-              backend.media.preservesPitch = true;
+            // Try multiple ways to access the media element
+            const mediaElement =
+              backend?.media ||
+              (ws as any).getMediaElement?.() ||
+              backend?.el ||
+              backend?.mediaElement;
+
+            if (mediaElement) {
+              mediaElement.preservesPitch = true;
+
+              // Set up gain node if not already created (tried in "load" event)
+              if (!gainNodeRef.current) {
+                const setupGainNode = async () => {
+                  try {
+                    // Check if source node already exists
+                    if ((mediaElement as any).__sourceNode) {
+                      console.warn(
+                        "Media element already has a source node - cannot create gain node"
+                      );
+                      return;
+                    }
+
+                    const audioContext = new (window.AudioContext ||
+                      (window as any).webkitAudioContext)();
+                    if (audioContext.state === "suspended") {
+                      await audioContext.resume();
+                    }
+
+                    const source =
+                      audioContext.createMediaElementSource(mediaElement);
+                    (mediaElement as any).__sourceNode = source;
+
+                    const gainNode = audioContext.createGain();
+                    gainNode.gain.value = 1.0;
+
+                    source.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+
+                    audioContextRef.current = audioContext;
+                    mediaSourceRef.current = source;
+                    gainNodeRef.current = gainNode;
+                  } catch (err: any) {
+                    console.error(
+                      "❌ Failed to create gain node:",
+                      err.message || err
+                    );
+                  }
+                };
+                setupGainNode();
+              }
             }
           } catch (err) {
             // Ignore if playback rate setting fails
@@ -172,7 +258,34 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
       }
 
       /* destroy after browser is idle (avoids audio glitches) */
-      requestIdleCallback(() => destroy(wsRef.current));
+      requestIdleCallback(() => {
+        destroy(wsRef.current);
+        // Clean up audio context and nodes
+        if (mediaSourceRef.current) {
+          try {
+            mediaSourceRef.current.disconnect();
+          } catch (e) {
+            // Ignore disconnect errors
+          }
+          mediaSourceRef.current = null;
+        }
+        if (gainNodeRef.current) {
+          try {
+            gainNodeRef.current.disconnect();
+          } catch (e) {
+            // Ignore disconnect errors
+          }
+          gainNodeRef.current = null;
+        }
+        if (audioContextRef.current) {
+          try {
+            audioContextRef.current.close();
+          } catch (e) {
+            // Ignore close errors
+          }
+          audioContextRef.current = null;
+        }
+      });
     };
   }, [clip.url, destroy]);
 
@@ -258,61 +371,86 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
     if (!isReady || !ws) return;
     // Clamp volume to 0-3.0 (0-300%)
     const vol = Math.max(0, Math.min(3, v));
-    
-    // Access Web Audio API gain node for volume boost beyond 100%
+
     try {
       const backend = (ws as any).backend;
-      const gainNode = backend?.gainNode;
-      
-      if (gainNode && vol > 1.0) {
-        // For volumes > 100%, set WaveSurfer to max (1.0) and apply additional gain
-        // This works with both WebAudio and MediaElement backends
-        ws.setVolume(1.0);
-        gainNode.gain.value = vol;
+
+      // Try to get gain node from backend (WebAudio) or use our custom one (MediaElement)
+      let gainNode = backend?.gainNode;
+
+      // If no gainNode from backend, use our custom one for MediaElement
+      if (!gainNode) {
+        gainNode = gainNodeRef.current;
+      }
+
+      if (gainNode) {
+        // Ensure audio context is running
+        const audioContext = audioContextRef.current || backend?.ac;
+        if (audioContext && audioContext.state === "suspended") {
+          audioContext.resume().catch(console.error);
+        }
+
+        if (vol > 1.0) {
+          // For volumes > 100%, set WaveSurfer to max (1.0) and apply additional gain
+          ws.setVolume(1.0);
+          // Use setValueAtTime for smooth transitions, or direct assignment for immediate change
+          gainNode.gain.setValueAtTime(vol, audioContext?.currentTime || 0);
+        } else {
+          // For volumes <= 100%, use normal WaveSurfer volume
+          ws.setVolume(vol);
+          gainNode.gain.setValueAtTime(1.0, audioContext?.currentTime || 0); // Reset gain node to default
+        }
       } else {
-        // For volumes <= 100%, use normal WaveSurfer volume
-        ws.setVolume(vol);
-        if (gainNode) {
-          gainNode.gain.value = 1.0; // Reset gain node to default
+        // No gain node available, use standard WaveSurfer volume (limited to 100%)
+        const volClamped = Math.max(0, Math.min(1, vol));
+        ws.setVolume(volClamped);
+        if (vol > 1.0) {
+          console.warn(
+            "No gain node available, volume limited to 100%. Gain node ref:",
+            gainNodeRef.current
+          );
         }
       }
       setVolume(vol);
     } catch (err) {
-      // Fallback to standard volume if gain node access fails
-      // MediaElement backend might not have gainNode, so clamp to 0-1
+      console.error("Failed to set volume:", err);
+      // Fallback to standard volume
       const volClamped = Math.max(0, Math.min(1, vol));
       ws.setVolume(volClamped);
       setVolume(volClamped);
     }
   };
 
-  const changePlaybackRate = useCallback((rate: number) => {
-    const ws = wsRef.current;
-    if (!isReady || !ws) return;
-    // Clamp playback rate to 0.5x - 2.0x
-    const clampedRate = Math.max(0.5, Math.min(2.0, rate));
-    
-    try {
-      // Set playback rate
-      ws.setPlaybackRate(clampedRate);
-      
-      // Enable preservesPitch for tempo change (speed without pitch shift)
-      // MediaElement backend supports this natively
-      const backend = (ws as any).backend;
-      if (backend?.media) {
-        backend.media.preservesPitch = true;
+  const changePlaybackRate = useCallback(
+    (rate: number) => {
+      const ws = wsRef.current;
+      if (!isReady || !ws) return;
+      // Clamp playback rate to 0.5x - 2.0x
+      const clampedRate = Math.max(0.5, Math.min(2.0, rate));
+
+      try {
+        // Set playback rate
+        ws.setPlaybackRate(clampedRate);
+
+        // Enable preservesPitch for tempo change (speed without pitch shift)
+        // MediaElement backend supports this natively
+        const backend = (ws as any).backend;
+        if (backend?.media) {
+          backend.media.preservesPitch = true;
+        }
+
+        // Update effective duration based on playback rate
+        // When rate is 0.5x, duration is 2x longer (takes longer to play)
+        const effectiveDuration = originalDurationRef.current / clampedRate;
+        setDuration(effectiveDuration);
+
+        setPlaybackRate(clampedRate);
+      } catch (err) {
+        console.error("Failed to set playback rate:", err);
       }
-      
-      // Update effective duration based on playback rate
-      // When rate is 0.5x, duration is 2x longer (takes longer to play)
-      const effectiveDuration = originalDurationRef.current / clampedRate;
-      setDuration(effectiveDuration);
-      
-      setPlaybackRate(clampedRate);
-    } catch (err) {
-      console.error("Failed to set playback rate:", err);
-    }
-  }, [isReady]);
+    },
+    [isReady]
+  );
 
   const clearSelection = useCallback(() => {
     const regions = regionsRef.current;
@@ -568,7 +706,9 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
                   max="2.0"
                   step="0.1"
                   value={playbackRate}
-                  onChange={(e) => changePlaybackRate(parseFloat(e.target.value))}
+                  onChange={(e) =>
+                    changePlaybackRate(parseFloat(e.target.value))
+                  }
                   className="w-20"
                 />
                 <span className="text-xs text-gray-600 min-w-[2.5rem]">
