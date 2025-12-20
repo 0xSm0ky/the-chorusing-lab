@@ -425,19 +425,62 @@ export async function POST(request: NextRequest) {
       // Use the same execFunction we created earlier (with custom binary if needed)
       await execFunction(url, downloadOptions);
 
-      // Read the audio file
-      audioBuffer = readFileSync(audioFilePath);
+      // Read the audio file - yt-dlp may have changed the extension
+      // Check what file was actually created
+      let actualAudioFile = audioFilePath;
+      const basePath = audioFilePath.replace(/\.(m4a|webm|mp3|ogg)$/, "");
+      
+      // Check for common audio extensions
+      const possibleExtensions = [".m4a", ".webm", ".mp3", ".ogg", ".opus"];
+      for (const ext of possibleExtensions) {
+        const testPath = basePath + ext;
+        if (existsSync(testPath)) {
+          actualAudioFile = testPath;
+          break;
+        }
+      }
+      
+      // If no file found with expected extension, try to find any audio file in temp dir
+      if (!existsSync(actualAudioFile)) {
+        const tempFiles = readdirSync(tempDir);
+        const audioFile = tempFiles.find((f) => 
+          f.startsWith(`audio-${timestamp}`) || 
+          /\.(m4a|webm|mp3|ogg|opus)$/i.test(f)
+        );
+        if (audioFile) {
+          actualAudioFile = join(tempDir, audioFile);
+        }
+      }
+      
+      if (!existsSync(actualAudioFile)) {
+        throw new Error("Downloaded audio file not found");
+      }
+      
+      audioBuffer = readFileSync(actualAudioFile);
       console.log("✅ Audio downloaded:", audioBuffer.length, "bytes");
+      
+      // Get the actual file extension
+      const actualExt = actualAudioFile.split(".").pop() || "m4a";
 
       // Clean up audio file
       try {
-        unlinkSync(audioFilePath);
+        unlinkSync(actualAudioFile);
       } catch (e) {
         console.warn("⚠️ Could not delete temp audio file:", e);
       }
 
-      // Determine filename
-      const filename = `${videoTitle.replace(/[^a-zA-Z0-9\-_]/g, "_")}.m4a`;
+      // Determine filename with correct extension
+      const filename = `${videoTitle.replace(/[^a-zA-Z0-9\-_]/g, "_")}.${actualExt}`;
+      
+      // Determine MIME type based on extension
+      const mimeTypes: Record<string, string> = {
+        m4a: "audio/mp4",
+        webm: "audio/webm",
+        mp3: "audio/mpeg",
+        ogg: "audio/ogg",
+        opus: "audio/opus",
+      };
+      const mimeType = mimeTypes[actualExt.toLowerCase()] || "audio/mp4";
 
       // Convert buffer to base64 for JSON response
       const audioBase64 = audioBuffer.toString("base64");
