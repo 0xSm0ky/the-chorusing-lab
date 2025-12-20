@@ -399,12 +399,20 @@ export async function POST(request: NextRequest) {
 
       const downloadOptions: any = {
         // STRICTLY avoid MP4 - it has metadata parsing issues in browsers (especially Firefox)
-        // Prefer MP3 and WebM which are more browser-compatible
-        // Explicitly exclude MP4/M4V formats
+        // Use format selection that explicitly avoids MP4 container
+        // Prefer MP3 and WebM which are most browser-compatible
         format:
           "bestaudio[ext=mp3]/bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio[ext=m4a]/bestaudio",
-        // Use formatSort to prefer non-MP4 formats
-        formatSort: "ext:mp3:prefer,ext:webm:prefer,ext:opus:prefer,ext:ogg:prefer,ext:m4a:prefer",
+        // Use formatSort to prefer non-MP4 formats and deprioritize MP4
+        formatSort: [
+          "ext:mp3:prefer",
+          "ext:webm:prefer", 
+          "ext:opus:prefer",
+          "ext:ogg:prefer",
+          "ext:m4a:prefer",
+          "ext:mp4:-prefer", // Deprioritize MP4
+          "ext:m4v:-prefer", // Deprioritize M4V
+        ],
         // Use output template to ensure we get the right extension
         output: join(tempDir, `audio-${timestamp}.%(ext)s`),
         noWarnings: true,
