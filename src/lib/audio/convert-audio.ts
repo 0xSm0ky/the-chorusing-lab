@@ -12,7 +12,7 @@ export interface ConversionOptions {
 /**
  * Converts an audio file to a browser-compatible format (MP3 or WebM)
  * This is useful for converting MP4/M4A files that have metadata parsing issues
- * 
+ *
  * @param audioFile - The audio file to convert
  * @param options - Optional conversion settings
  * @returns Promise resolving to the converted File
@@ -24,7 +24,11 @@ export async function convertAudioToCompatibleFormat(
   const { onProgress, audioBitsPerSecond = 128000 } = options;
 
   return new Promise((resolve, reject) => {
-    console.log("🔄 Starting audio conversion:", audioFile.name, audioFile.type);
+    console.log(
+      "🔄 Starting audio conversion:",
+      audioFile.name,
+      audioFile.type
+    );
 
     // Create an audio element from the file
     const audioElement = new Audio();
@@ -107,7 +111,7 @@ export async function convertAudioToCompatibleFormat(
 
         mediaRecorder.addEventListener("stop", () => {
           const finalBlob = new Blob(chunks, { type: selectedMimeType });
-          
+
           // Determine file extension based on MIME type
           let extension = "webm";
           if (selectedMimeType.includes("mpeg")) {
