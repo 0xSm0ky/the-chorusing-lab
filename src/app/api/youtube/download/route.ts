@@ -401,17 +401,9 @@ export async function POST(request: NextRequest) {
         // STRICTLY avoid MP4 - it has metadata parsing issues in browsers (especially Firefox)
         // Use format selection that explicitly avoids MP4 container
         // Prefer MP3 and WebM which are most browser-compatible
-        // Use simple bestaudio selection - formatSort will handle preferences
-        // This ensures we always get something, even if preferred formats aren't available
-        format: "bestaudio",
-        // Use formatSort to prefer non-MP4 formats (but don't exclude MP4 completely)
-        formatSort: [
-          "ext:mp3:prefer",
-          "ext:webm:prefer",
-          "ext:opus:prefer",
-          "ext:ogg:prefer",
-          "ext:m4a:prefer",
-        ],
+        // Use format selection with fallbacks - this ensures we always get something
+        // Try preferred formats first, then fall back to any audio format
+        format: "bestaudio/best[height<=480]/best",
         // Use output template to ensure we get the right extension
         output: join(tempDir, `audio-${timestamp}.%(ext)s`),
         noWarnings: true,
