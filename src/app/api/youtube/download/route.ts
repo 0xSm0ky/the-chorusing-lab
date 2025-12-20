@@ -263,11 +263,13 @@ export async function POST(request: NextRequest) {
           // In serverless environments, always use /tmp since node_modules is read-only
           // Check if we're in a serverless environment (Vercel uses /var/task)
           const isServerless = process.cwd().includes("/var/task");
-          
+
           if (isServerless) {
             // Always use /tmp in serverless environments - skip trying node_modules
             binPath = join(tmpdir(), "yt-dlp");
-            console.log(`⚠️ Serverless environment detected, using temp directory: ${binPath}`);
+            console.log(
+              `⚠️ Serverless environment detected, using temp directory: ${binPath}`
+            );
           } else {
             // Try to create bin directory in package location
             const binDir = dirname(binPath);
@@ -277,7 +279,9 @@ export async function POST(request: NextRequest) {
                 console.log(`✅ Created bin directory: ${binDir}`);
               } catch (mkdirError: any) {
                 // If we can't create the bin directory, use /tmp
-                console.warn(`⚠️ Cannot create bin directory (${mkdirError.message}), using temp directory`);
+                console.warn(
+                  `⚠️ Cannot create bin directory (${mkdirError.message}), using temp directory`
+                );
                 binPath = join(tmpdir(), "yt-dlp");
                 console.log(`⚠️ Using temp directory for binary: ${binPath}`);
               }
@@ -290,7 +294,7 @@ export async function POST(request: NextRequest) {
           if (!existsSync(binPath)) {
             throw new Error("Binary was not created after direct download");
           }
-          
+
           console.log(`✅ Binary ready at: ${binPath}`);
         } catch (downloadError: any) {
           console.error("❌ Failed to download binary:", downloadError);
@@ -303,7 +307,7 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    
+
     // Store the final binPath for use with youtube-dl-exec
     // This will be the path we actually use, whether from package or /tmp
     const finalBinPath = binPath;
@@ -331,9 +335,13 @@ export async function POST(request: NextRequest) {
         preferFreeFormats: true,
         addHeader: ["referer:youtube.com", "user-agent:Mozilla/5.0"],
       };
-      
+
       // If binary is in /tmp or not in node_modules, explicitly set the path
-      if (finalBinPath && (finalBinPath.includes("/tmp") || !finalBinPath.includes("node_modules"))) {
+      if (
+        finalBinPath &&
+        (finalBinPath.includes("/tmp") ||
+          !finalBinPath.includes("node_modules"))
+      ) {
         execOptions.ytDlpPath = finalBinPath;
         console.log("📊 Using explicit binary path:", finalBinPath);
       }
@@ -355,7 +363,7 @@ export async function POST(request: NextRequest) {
       // Download audio (extract audio only, prefer m4a format)
       console.log("🎵 Downloading audio...");
       console.log("🎵 Output path:", audioFilePath);
-      
+
       const downloadOptions: any = {
         extractAudio: true,
         audioFormat: "m4a",
@@ -365,13 +373,17 @@ export async function POST(request: NextRequest) {
         preferFreeFormats: true,
         addHeader: ["referer:youtube.com", "user-agent:Mozilla/5.0"],
       };
-      
+
       // If binary is in /tmp or not in node_modules, explicitly set the path
-      if (finalBinPath && (finalBinPath.includes("/tmp") || !finalBinPath.includes("node_modules"))) {
+      if (
+        finalBinPath &&
+        (finalBinPath.includes("/tmp") ||
+          !finalBinPath.includes("node_modules"))
+      ) {
         downloadOptions.ytDlpPath = finalBinPath;
         console.log("🎵 Using explicit binary path:", finalBinPath);
       }
-      
+
       await youtubeDlExec(url, downloadOptions);
 
       // Read the audio file
