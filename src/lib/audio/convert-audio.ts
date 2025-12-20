@@ -23,16 +23,16 @@ export async function convertAudioToCompatibleFormat(
 ): Promise<File> {
   const { onProgress, audioBitsPerSecond = 128000 } = options;
 
-  console.log(
-    "🔄 Starting audio conversion:",
-    audioFile.name,
-    audioFile.type
-  );
+  console.log("🔄 Starting audio conversion:", audioFile.name, audioFile.type);
 
   try {
     // Read file as ArrayBuffer
     const arrayBuffer = await audioFile.arrayBuffer();
-    console.log("📦 Read file as ArrayBuffer:", arrayBuffer.byteLength, "bytes");
+    console.log(
+      "📦 Read file as ArrayBuffer:",
+      arrayBuffer.byteLength,
+      "bytes"
+    );
 
     // Create AudioContext
     const audioContext = new AudioContext();
@@ -40,7 +40,8 @@ export async function convertAudioToCompatibleFormat(
 
     try {
       // Try to decode audio data directly - this works even with MP4 metadata issues
-      audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+      // Use the full arrayBuffer (not sliced) to ensure we have all the data
+      audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
       console.log(
         "✅ Audio decoded successfully, duration:",
         audioBuffer.duration,
@@ -49,8 +50,13 @@ export async function convertAudioToCompatibleFormat(
     } catch (decodeError) {
       console.error("❌ AudioContext.decodeAudioData failed:", decodeError);
       audioContext.close();
+      
+      // If decodeAudioData fails, the MP4 is too corrupted for client-side conversion
+      // We need to inform the user that server-side conversion would be needed
       throw new Error(
-        "Failed to decode audio file. The file may be corrupted or in an unsupported format."
+        "This MP4 file cannot be decoded in the browser due to metadata issues. " +
+        "The file would need server-side conversion (ffmpeg) which isn't available in this serverless environment. " +
+        "Please try a different video or use direct file upload with a different format."
       );
     }
 
@@ -64,11 +70,7 @@ export async function convertAudioToCompatibleFormat(
     source.connect(audioContext.destination);
 
     // Set up MediaRecorder to record as MP3 (or webm if MP3 not supported)
-    const mimeTypes = [
-      "audio/mpeg",
-      "audio/webm;codecs=opus",
-      "audio/webm",
-    ];
+    const mimeTypes = ["audio/mpeg", "audio/webm;codecs=opus", "audio/webm"];
     let selectedMimeType = "";
 
     for (const mimeType of mimeTypes) {
@@ -171,9 +173,7 @@ export async function convertAudioToCompatibleFormat(
     });
   } catch (error) {
     console.error("❌ Conversion failed:", error);
-    throw error instanceof Error
-      ? error
-      : new Error("Audio conversion failed");
+    throw error instanceof Error ? error : new Error("Audio conversion failed");
   }
 }
 
