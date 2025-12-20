@@ -401,8 +401,10 @@ export async function POST(request: NextRequest) {
         // STRICTLY avoid MP4 - it has metadata parsing issues in browsers (especially Firefox)
         // Use format selection that explicitly avoids MP4 container
         // Prefer MP3 and WebM which are most browser-compatible
+        // Prefer non-MP4 formats, but allow fallback if needed
+        // The format selection will try preferred formats first, then fall back
         format:
-          "bestaudio[ext!=mp4][ext!=m4v][ext=mp3]/bestaudio[ext!=mp4][ext!=m4v][ext=webm]/bestaudio[ext!=mp4][ext!=m4v][ext=opus]/bestaudio[ext!=mp4][ext!=m4v][ext=ogg]/bestaudio[ext!=mp4][ext!=m4v][ext=m4a]/bestaudio[ext!=mp4][ext!=m4v]",
+          "bestaudio[ext!=mp4][ext!=m4v][ext=mp3]/bestaudio[ext!=mp4][ext!=m4v][ext=webm]/bestaudio[ext!=mp4][ext!=m4v][ext=opus]/bestaudio[ext!=mp4][ext!=m4v][ext=ogg]/bestaudio[ext!=mp4][ext!=m4v][ext=m4a]/bestaudio[ext!=mp4][ext!=m4v]/bestaudio",
         // Use formatSort to prefer non-MP4 formats and deprioritize MP4
         formatSort: [
           "ext:mp3:prefer",
@@ -487,17 +489,15 @@ export async function POST(request: NextRequest) {
 
       // Validate that we got an audio-only format (not video MP4)
       // MP4 files often have metadata issues in browsers, especially Firefox
+      // However, if MP4 is the only format available, we'll allow it but warn the user
       if (actualExt === "mp4" || actualExt === "m4v") {
-        console.error(
-          "❌ Got MP4 file which has known metadata parsing issues in browsers. File:",
+        console.warn(
+          "⚠️ Got MP4 file which may have metadata parsing issues in browsers. File:",
           actualAudioFile
         );
-        // Reject MP4 files - they cause browser parsing errors
-        throw new Error(
-          "Downloaded file is in MP4 format which has metadata parsing issues in browsers. " +
-            "Please try again - the system will attempt to download in a different format (MP3/WebM). " +
-            "If this persists, the video may only be available in MP4 format."
-        );
+        // Note: We'll allow MP4 files through but they may fail in the browser
+        // The client-side error handling will show a user-friendly message
+        // This is better than failing completely when MP4 is the only format available
       }
 
       // Clean up audio file
