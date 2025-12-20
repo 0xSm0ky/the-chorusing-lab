@@ -292,9 +292,20 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
   /* ------------------------------------------------------------------ */
   /* Playback controls                                                  */
   /* ------------------------------------------------------------------ */
-  const playPause = useCallback(() => {
+  const playPause = useCallback(async () => {
     const ws = wsRef.current;
     if (!isReady || !ws) return;
+    
+    // Resume audio context if suspended (required for autoplay policy)
+    // This ensures playback works even if audio context was created before user interaction
+    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+      try {
+        await audioContextRef.current.resume();
+      } catch (err) {
+        console.warn("Failed to resume audio context:", err);
+      }
+    }
+    
     isPlaying ? ws.pause() : ws.play();
   }, [isReady, isPlaying]);
 
@@ -332,9 +343,18 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
     setIsPlaying(false);
   }, [isReady, region]);
 
-  const restart = useCallback(() => {
+  const restart = useCallback(async () => {
     const ws = wsRef.current;
     if (!isReady || !ws) return;
+
+    // Resume audio context if suspended (required for autoplay policy)
+    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+      try {
+        await audioContextRef.current.resume();
+      } catch (err) {
+        console.warn("Failed to resume audio context:", err);
+      }
+    }
 
     // CRITICAL: Temporarily disable regions to allow seeks
     const regions = regionsRef.current;
