@@ -395,12 +395,15 @@ export async function POST(request: NextRequest) {
 
       // Check available formats to help debug format selection issues
       const availableFormats = (info as any).formats || [];
+      // Find audio-only formats (no video codec, or video codec is "none")
       const audioFormats = availableFormats.filter(
         (f: any) =>
           f.acodec && f.acodec !== "none" && (!f.vcodec || f.vcodec === "none")
       );
+      // Exclude MP4 container formats (mp4, m4v, m4a) - they all have metadata parsing issues
+      // M4A is audio in MP4 container, which also has the metadata issue
       const nonMp4AudioFormats = audioFormats.filter(
-        (f: any) => f.ext && f.ext !== "mp4" && f.ext !== "m4v"
+        (f: any) => f.ext && f.ext !== "mp4" && f.ext !== "m4v" && f.ext !== "m4a"
       );
 
       console.log(`📊 Available formats: ${availableFormats.length} total`);
@@ -424,22 +427,25 @@ export async function POST(request: NextRequest) {
       // If we have non-MP4 audio formats, use a format ID instead of bestaudio
       // This ensures we get a specific format that works
       let selectedFormat: string | undefined;
-      
-      // Check if we only have MP4/M4V formats available
+
+      // Check if we only have MP4 container formats available (mp4, m4v, m4a)
+      // These all use MP4 container which has metadata parsing issues in browsers
       if (audioFormats.length > 0 && nonMp4AudioFormats.length === 0) {
-        console.warn("⚠️ Only MP4/M4V audio formats available - these have browser compatibility issues");
-        // We can't convert MP4 to other formats without ffmpeg (not available in serverless)
+        console.warn(
+          "⚠️ Only MP4 container formats (MP4/M4V/M4A) available - these have browser compatibility issues"
+        );
+        // We can't convert MP4 container formats to other formats without ffmpeg (not available in serverless)
         // Reject with a clear error message
         throw new Error(
-          "This video is only available in MP4 format, which has metadata parsing issues in browsers. " +
-          "Unfortunately, we cannot convert MP4 files to other formats in this serverless environment. " +
-          "Please try a different video, or use the direct file upload feature instead."
+          "This video is only available in MP4 container formats (MP4/M4V/M4A), which have metadata parsing issues in browsers. " +
+            "Unfortunately, we cannot convert these formats to other containers in this serverless environment. " +
+            "Please try a different video, or use the direct file upload feature instead."
         );
       }
-      
+
       if (nonMp4AudioFormats.length > 0) {
-        // Prefer MP3, WebM, Opus, OGG, M4A in that order
-        const preferredExts = ["mp3", "webm", "opus", "ogg", "m4a"];
+        // Prefer MP3, WebM, Opus, OGG (exclude M4A as it's MP4 container)
+        const preferredExts = ["mp3", "webm", "opus", "ogg"];
         for (const ext of preferredExts) {
           const format = nonMp4AudioFormats.find((f: any) => f.ext === ext);
           if (format) {
@@ -541,17 +547,18 @@ export async function POST(request: NextRequest) {
       const actualExt =
         actualAudioFile.split(".").pop()?.toLowerCase() || "mp3";
 
-      // Validate that we got an audio-only format (not video MP4)
-      // MP4 files often have metadata issues in browsers, especially Firefox
-      // However, if MP4 is the only format available, we'll allow it but warn the user
-      if (actualExt === "mp4" || actualExt === "m4v") {
-        console.warn(
-          "⚠️ Got MP4 file which may have metadata parsing issues in browsers. File:",
+      // Validate that we got a non-MP4 container format
+      // MP4, M4V, and M4A all use MP4 container which has metadata issues in browsers
+      if (actualExt === "mp4" || actualExt === "m4v" || actualExt === "m4a") {
+        console.error(
+          "❌ Got MP4 container file (ext: " + actualExt + ") which has metadata parsing issues in browsers. File:",
           actualAudioFile
         );
-        // Note: We'll allow MP4 files through but they may fail in the browser
-        // The client-side error handling will show a user-friendly message
-        // This is better than failing completely when MP4 is the only format available
+        // Reject MP4 container formats - they cause browser parsing errors
+        throw new Error(
+          "Downloaded file is in MP4 container format (" + actualExt + ") which has metadata parsing issues in browsers. " +
+            "This should not happen if format selection worked correctly. Please try again."
+        );
       }
 
       // Clean up audio file
