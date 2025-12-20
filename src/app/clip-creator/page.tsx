@@ -29,6 +29,8 @@ export default function ClipCreatorPage() {
   const [sourceUrl, setSourceUrl] = useState<string>("");
   const [inputMode, setInputMode] = useState<InputMode>("file");
   const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeCookies, setYoutubeCookies] = useState("");
+  const [showCookieHelp, setShowCookieHelp] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -107,7 +109,10 @@ export default function ClipCreatorPage() {
           "Content-Type": "application/json",
           ...getAuthHeaders(),
         },
-        body: JSON.stringify({ url: youtubeUrl.trim() }),
+        body: JSON.stringify({ 
+          url: youtubeUrl.trim(),
+          cookies: youtubeCookies.trim() || undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -331,6 +336,45 @@ export default function ClipCreatorPage() {
                           disabled={downloading}
                         />
                       </div>
+                      
+                      {/* Cookie input (optional) */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-gray-700">
+                            Cookies (Optional - improves success rate)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowCookieHelp(!showCookieHelp)}
+                            className="text-xs text-indigo-600 hover:text-indigo-700"
+                          >
+                            {showCookieHelp ? "Hide" : "How?"}
+                          </button>
+                        </div>
+                        {showCookieHelp && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-800">
+                            <p className="font-medium mb-2">How to export YouTube cookies:</p>
+                            <ol className="list-decimal list-inside space-y-1 ml-2">
+                              <li>Install a browser extension like "Get cookies.txt LOCALLY" (Chrome/Edge) or "cookies.txt" (Firefox)</li>
+                              <li>Go to youtube.com and make sure you're logged in</li>
+                              <li>Click the extension icon and export cookies for youtube.com</li>
+                              <li>Paste the cookies content here</li>
+                            </ol>
+                            <p className="mt-2 text-xs">
+                              Cookies help avoid YouTube's bot detection. They're only used for downloading and aren't stored.
+                            </p>
+                          </div>
+                        )}
+                        <textarea
+                          value={youtubeCookies}
+                          onChange={(e) => setYoutubeCookies(e.target.value)}
+                          placeholder="Paste Netscape format cookies here (optional)"
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono"
+                          disabled={downloading}
+                        />
+                      </div>
+                      
                       <button
                         onClick={handleYouTubeDownload}
                         disabled={!youtubeUrl.trim() || downloading}

@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { url } = body;
+    const { url, cookies } = body;
 
     if (!url || typeof url !== "string") {
       return NextResponse.json(
@@ -316,6 +316,19 @@ export async function POST(request: NextRequest) {
     const tempDir = tmpdir();
     const timestamp = Date.now();
     const audioFilePath = join(tempDir, `audio-${timestamp}.m4a`);
+    
+    // Handle cookies if provided
+    let cookiesFilePath: string | undefined;
+    if (cookies && typeof cookies === "string" && cookies.trim()) {
+      try {
+        cookiesFilePath = join(tempDir, `cookies-${timestamp}.txt`);
+        writeFileSync(cookiesFilePath, cookies.trim());
+        console.log("🍪 Using provided cookies file");
+      } catch (cookieError: any) {
+        console.warn("⚠️ Failed to write cookies file:", cookieError.message);
+        // Continue without cookies
+      }
+    }
 
     let videoTitle = "";
     let videoDuration = 0;
@@ -329,7 +342,7 @@ export async function POST(request: NextRequest) {
 
       // Create a custom youtube-dl-exec instance with our binary path if needed
       // Use more realistic browser headers to avoid bot detection
-      const execOptions = {
+      const execOptions: any = {
         dumpSingleJson: true,
         noWarnings: true,
         noCheckCertificates: true,
@@ -344,6 +357,12 @@ export async function POST(request: NextRequest) {
         extractFlat: false,
         noPlaylist: true,
       };
+      
+      // Add cookies if provided (yt-dlp uses --cookies option)
+      if (cookiesFilePath && existsSync(cookiesFilePath)) {
+        execOptions.cookies = cookiesFilePath;
+        console.log("🍪 Using cookies for authentication");
+      }
 
       // If binary is in /tmp or not in node_modules, use create() to specify custom path
       let execFunction;
@@ -379,7 +398,7 @@ export async function POST(request: NextRequest) {
       console.log("🎵 Downloading audio...");
       console.log("🎵 Output path:", audioFilePath);
 
-      const downloadOptions = {
+      const downloadOptions: any = {
         extractAudio: true,
         audioFormat: "m4a",
         output: audioFilePath,
@@ -395,6 +414,11 @@ export async function POST(request: NextRequest) {
         // Additional options to reduce bot detection
         noPlaylist: true,
       };
+      
+      // Add cookies if provided (yt-dlp uses --cookies option)
+      if (cookiesFilePath && existsSync(cookiesFilePath)) {
+        downloadOptions.cookies = cookiesFilePath;
+      }
 
       // Use the same execFunction we created earlier (with custom binary if needed)
       await execFunction(url, downloadOptions);
@@ -434,9 +458,14 @@ export async function POST(request: NextRequest) {
     } catch (error: any) {
       // Clean up temp files on error
       try {
-        unlinkSync(audioFilePath);
+        if (existsSync(audioFilePath)) {
+          unlinkSync(audioFilePath);
+        }
+        if (cookiesFilePath && existsSync(cookiesFilePath)) {
+          unlinkSync(cookiesFilePath);
+        }
       } catch (e) {
-        // Ignore
+        // Ignore cleanup errors
       }
 
       console.error("❌ Failed to download video:", error);
