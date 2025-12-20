@@ -474,12 +474,16 @@ export async function POST(request: NextRequest) {
       console.log("✅ Audio downloaded:", audioBuffer.length, "bytes");
 
       // Get the actual file extension
-      const actualExt = actualAudioFile.split(".").pop()?.toLowerCase() || "mp3";
-      
+      const actualExt =
+        actualAudioFile.split(".").pop()?.toLowerCase() || "mp3";
+
       // Validate that we got an audio-only format (not video MP4)
       // MP4 files often have metadata issues, prefer other formats
       if (actualExt === "mp4" || actualExt === "m4v") {
-        console.warn("⚠️ Got MP4 file which may have metadata issues. File:", actualAudioFile);
+        console.warn(
+          "⚠️ Got MP4 file which may have metadata issues. File:",
+          actualAudioFile
+        );
         // We'll still try to use it, but log a warning
       }
 
@@ -508,7 +512,7 @@ export async function POST(request: NextRequest) {
         m4v: "audio/mp4",
       };
       const mimeType = mimeTypes[actualExt] || "audio/mpeg";
-      
+
       console.log("📦 Final audio file info:", {
         extension: actualExt,
         mimeType,
