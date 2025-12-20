@@ -400,7 +400,8 @@ export async function POST(request: NextRequest) {
       const downloadOptions: any = {
         // Use format selection to get audio-only without needing ffmpeg
         // Prefer audio formats that don't require post-processing
-        format: "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]",
+        format:
+          "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]",
         output: audioFilePath,
         noWarnings: true,
         noCheckCertificates: true,
@@ -429,7 +430,7 @@ export async function POST(request: NextRequest) {
       // Check what file was actually created
       let actualAudioFile = audioFilePath;
       const basePath = audioFilePath.replace(/\.(m4a|webm|mp3|ogg)$/, "");
-      
+
       // Check for common audio extensions
       const possibleExtensions = [".m4a", ".webm", ".mp3", ".ogg", ".opus"];
       for (const ext of possibleExtensions) {
@@ -439,26 +440,27 @@ export async function POST(request: NextRequest) {
           break;
         }
       }
-      
+
       // If no file found with expected extension, try to find any audio file in temp dir
       if (!existsSync(actualAudioFile)) {
         const tempFiles = readdirSync(tempDir);
-        const audioFile = tempFiles.find((f) => 
-          f.startsWith(`audio-${timestamp}`) || 
-          /\.(m4a|webm|mp3|ogg|opus)$/i.test(f)
+        const audioFile = tempFiles.find(
+          (f) =>
+            f.startsWith(`audio-${timestamp}`) ||
+            /\.(m4a|webm|mp3|ogg|opus)$/i.test(f)
         );
         if (audioFile) {
           actualAudioFile = join(tempDir, audioFile);
         }
       }
-      
+
       if (!existsSync(actualAudioFile)) {
         throw new Error("Downloaded audio file not found");
       }
-      
+
       audioBuffer = readFileSync(actualAudioFile);
       console.log("✅ Audio downloaded:", audioBuffer.length, "bytes");
-      
+
       // Get the actual file extension
       const actualExt = actualAudioFile.split(".").pop() || "m4a";
 
@@ -470,8 +472,11 @@ export async function POST(request: NextRequest) {
       }
 
       // Determine filename with correct extension
-      const filename = `${videoTitle.replace(/[^a-zA-Z0-9\-_]/g, "_")}.${actualExt}`;
-      
+      const filename = `${videoTitle.replace(
+        /[^a-zA-Z0-9\-_]/g,
+        "_"
+      )}.${actualExt}`;
+
       // Determine MIME type based on extension
       const mimeTypes: Record<string, string> = {
         m4a: "audio/mp4",

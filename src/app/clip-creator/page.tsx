@@ -363,7 +363,8 @@ export default function ClipCreatorPage() {
                                 &quot;cookies.txt&quot; (Firefox)
                               </li>
                               <li>
-                                Go to youtube.com and make sure you&apos;re logged in
+                                Go to youtube.com and make sure you&apos;re
+                                logged in
                               </li>
                               <li>
                                 Click the extension icon and export cookies for
@@ -373,8 +374,8 @@ export default function ClipCreatorPage() {
                             </ol>
                             <p className="mt-2 text-xs">
                               Cookies help avoid YouTube&apos;s bot detection.
-                              They&apos;re only used for downloading and aren&apos;t
-                              stored.
+                              They&apos;re only used for downloading and
+                              aren&apos;t stored.
                             </p>
                           </div>
                         )}
