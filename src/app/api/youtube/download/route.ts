@@ -399,10 +399,12 @@ export async function POST(request: NextRequest) {
 
       const downloadOptions: any = {
         // Use format selection to get audio-only without needing ffmpeg
-        // Prefer audio formats that don't require post-processing
+        // Prefer audio formats that browsers can play directly
+        // M4A (AAC) is most compatible, then MP3, then WebM
         format:
-          "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]",
-        output: audioFilePath,
+          "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=webm]/bestaudio/best[height<=480]",
+        // Use output template to ensure we get the right extension
+        output: join(tempDir, `audio-${timestamp}.%(ext)s`),
         noWarnings: true,
         noCheckCertificates: true,
         preferFreeFormats: true,
@@ -426,36 +428,39 @@ export async function POST(request: NextRequest) {
       // Use the same execFunction we created earlier (with custom binary if needed)
       await execFunction(url, downloadOptions);
 
-      // Read the audio file - yt-dlp may have changed the extension
-      // Check what file was actually created
-      let actualAudioFile = audioFilePath;
-      const basePath = audioFilePath.replace(/\.(m4a|webm|mp3|ogg)$/, "");
-
-      // Check for common audio extensions
-      const possibleExtensions = [".m4a", ".webm", ".mp3", ".ogg", ".opus"];
-      for (const ext of possibleExtensions) {
-        const testPath = basePath + ext;
-        if (existsSync(testPath)) {
-          actualAudioFile = testPath;
-          break;
-        }
-      }
-
-      // If no file found with expected extension, try to find any audio file in temp dir
-      if (!existsSync(actualAudioFile)) {
-        const tempFiles = readdirSync(tempDir);
-        const audioFile = tempFiles.find(
-          (f) =>
-            f.startsWith(`audio-${timestamp}`) ||
-            /\.(m4a|webm|mp3|ogg|opus)$/i.test(f)
+      // Read the audio file - yt-dlp uses output template with %(ext)s
+      // So the actual file will have the format's extension
+      // Find the file that was actually created
+      let actualAudioFile: string | null = null;
+      
+      // Check for files matching our timestamp pattern
+      const tempFiles = readdirSync(tempDir);
+      const audioFile = tempFiles.find((f) => f.startsWith(`audio-${timestamp}`));
+      
+      if (audioFile) {
+        actualAudioFile = join(tempDir, audioFile);
+        console.log("📁 Found downloaded file:", actualAudioFile);
+      } else {
+        // Fallback: look for any recent audio file
+        const audioFiles = tempFiles.filter((f) =>
+          /\.(m4a|webm|mp3|ogg|opus|m4a)$/i.test(f)
         );
-        if (audioFile) {
-          actualAudioFile = join(tempDir, audioFile);
+        if (audioFiles.length > 0) {
+          // Get the most recently modified
+          const filesWithStats = audioFiles.map((f) => ({
+            name: f,
+            path: join(tempDir, f),
+            mtime: statSync(join(tempDir, f)).mtime.getTime(),
+          }));
+          filesWithStats.sort((a, b) => b.mtime - a.mtime);
+          actualAudioFile = filesWithStats[0].path;
+          console.log("📁 Found audio file (fallback):", actualAudioFile);
         }
       }
 
-      if (!existsSync(actualAudioFile)) {
-        throw new Error("Downloaded audio file not found");
+      if (!actualAudioFile || !existsSync(actualAudioFile)) {
+        console.error("❌ No audio file found. Temp directory contents:", tempFiles);
+        throw new Error("Downloaded audio file not found. yt-dlp may have failed to download the file.");
       }
 
       audioBuffer = readFileSync(actualAudioFile);
