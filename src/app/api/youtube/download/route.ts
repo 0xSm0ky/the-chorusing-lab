@@ -398,8 +398,9 @@ export async function POST(request: NextRequest) {
       console.log("🎵 Output path:", audioFilePath);
 
       const downloadOptions: any = {
-        extractAudio: true,
-        audioFormat: "m4a",
+        // Use format selection to get audio-only without needing ffmpeg
+        // Prefer audio formats that don't require post-processing
+        format: "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]",
         output: audioFilePath,
         noWarnings: true,
         noCheckCertificates: true,
@@ -412,6 +413,8 @@ export async function POST(request: NextRequest) {
         ],
         // Additional options to reduce bot detection
         noPlaylist: true,
+        // Skip post-processing to avoid needing ffmpeg
+        postprocessorArgs: "ffmpeg:-vn", // Extract audio only if ffmpeg is available, but don't fail if not
       };
 
       // Add cookies if provided (yt-dlp uses --cookies option)
