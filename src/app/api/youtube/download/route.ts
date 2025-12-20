@@ -478,13 +478,18 @@ export async function POST(request: NextRequest) {
         actualAudioFile.split(".").pop()?.toLowerCase() || "mp3";
 
       // Validate that we got an audio-only format (not video MP4)
-      // MP4 files often have metadata issues, prefer other formats
+      // MP4 files often have metadata issues in browsers, especially Firefox
       if (actualExt === "mp4" || actualExt === "m4v") {
-        console.warn(
-          "⚠️ Got MP4 file which may have metadata issues. File:",
+        console.error(
+          "❌ Got MP4 file which has known metadata parsing issues in browsers. File:",
           actualAudioFile
         );
-        // We'll still try to use it, but log a warning
+        // Reject MP4 files - they cause browser parsing errors
+        throw new Error(
+          "Downloaded file is in MP4 format which has metadata parsing issues in browsers. " +
+          "Please try again - the system will attempt to download in a different format (MP3/WebM). " +
+          "If this persists, the video may only be available in MP4 format."
+        );
       }
 
       // Clean up audio file
