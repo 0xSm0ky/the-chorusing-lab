@@ -316,7 +316,7 @@ export async function POST(request: NextRequest) {
     const tempDir = tmpdir();
     const timestamp = Date.now();
     const audioFilePath = join(tempDir, `audio-${timestamp}.m4a`);
-    
+
     // Handle cookies if provided
     let cookiesFilePath: string | undefined;
     if (cookies && typeof cookies === "string" && cookies.trim()) {
@@ -354,10 +354,9 @@ export async function POST(request: NextRequest) {
           "accept-language:en-US,en;q=0.5",
         ],
         // Additional options to reduce bot detection
-        extractFlat: false,
         noPlaylist: true,
       };
-      
+
       // Add cookies if provided (yt-dlp uses --cookies option)
       if (cookiesFilePath && existsSync(cookiesFilePath)) {
         execOptions.cookies = cookiesFilePath;
@@ -414,7 +413,7 @@ export async function POST(request: NextRequest) {
         // Additional options to reduce bot detection
         noPlaylist: true,
       };
-      
+
       // Add cookies if provided (yt-dlp uses --cookies option)
       if (cookiesFilePath && existsSync(cookiesFilePath)) {
         downloadOptions.cookies = cookiesFilePath;
