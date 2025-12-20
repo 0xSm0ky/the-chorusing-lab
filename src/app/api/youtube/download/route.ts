@@ -432,11 +432,13 @@ export async function POST(request: NextRequest) {
       // So the actual file will have the format's extension
       // Find the file that was actually created
       let actualAudioFile: string | null = null;
-      
+
       // Check for files matching our timestamp pattern
       const tempFiles = readdirSync(tempDir);
-      const audioFile = tempFiles.find((f) => f.startsWith(`audio-${timestamp}`));
-      
+      const audioFile = tempFiles.find((f) =>
+        f.startsWith(`audio-${timestamp}`)
+      );
+
       if (audioFile) {
         actualAudioFile = join(tempDir, audioFile);
         console.log("📁 Found downloaded file:", actualAudioFile);
@@ -459,8 +461,13 @@ export async function POST(request: NextRequest) {
       }
 
       if (!actualAudioFile || !existsSync(actualAudioFile)) {
-        console.error("❌ No audio file found. Temp directory contents:", tempFiles);
-        throw new Error("Downloaded audio file not found. yt-dlp may have failed to download the file.");
+        console.error(
+          "❌ No audio file found. Temp directory contents:",
+          tempFiles
+        );
+        throw new Error(
+          "Downloaded audio file not found. yt-dlp may have failed to download the file."
+        );
       }
 
       audioBuffer = readFileSync(actualAudioFile);

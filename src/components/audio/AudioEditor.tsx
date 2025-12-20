@@ -160,7 +160,13 @@ export function AudioEditor({ file, sourceUrl }: AudioEditorProps) {
             });
             clearTimeout(timeout);
             const errorMsg = audioError?.message || "Test audio failed to load";
-            reject(new Error(`Audio loading error: ${errorMsg} (Code: ${audioError?.code || "unknown"})`));
+            reject(
+              new Error(
+                `Audio loading error: ${errorMsg} (Code: ${
+                  audioError?.code || "unknown"
+                })`
+              )
+            );
           });
 
           testAudio.src = objectUrl;

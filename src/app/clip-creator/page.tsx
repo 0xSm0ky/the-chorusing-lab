@@ -140,14 +140,25 @@ export default function ClipCreatorPage() {
           c.charCodeAt(0)
         );
         console.log("✅ Decoded audio data:", audioData.length, "bytes");
-        
+
         const audioBlob = new Blob([audioData], { type: data.audio.mimeType });
-        console.log("✅ Created blob:", audioBlob.size, "bytes, type:", audioBlob.type);
-        
+        console.log(
+          "✅ Created blob:",
+          audioBlob.size,
+          "bytes, type:",
+          audioBlob.type
+        );
+
         const audioFile = new File([audioBlob], data.audio.filename, {
           type: data.audio.mimeType,
         });
-        console.log("✅ Created file:", audioFile.name, audioFile.size, "bytes, type:", audioFile.type);
+        console.log(
+          "✅ Created file:",
+          audioFile.name,
+          audioFile.size,
+          "bytes, type:",
+          audioFile.type
+        );
 
         setSelectedFile(audioFile);
         // Store the YouTube URL as the source URL for extracted clips
@@ -155,7 +166,11 @@ export default function ClipCreatorPage() {
         setFileError(null);
       } catch (decodeError) {
         console.error("❌ Failed to decode audio data:", decodeError);
-        throw new Error(`Failed to decode audio: ${decodeError instanceof Error ? decodeError.message : "Unknown error"}`);
+        throw new Error(
+          `Failed to decode audio: ${
+            decodeError instanceof Error ? decodeError.message : "Unknown error"
+          }`
+        );
       }
     } catch (error) {
       console.error("YouTube download error:", error);
