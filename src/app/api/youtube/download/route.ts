@@ -384,45 +384,70 @@ export async function POST(request: NextRequest) {
       }
 
       console.error("❌ Failed to download video:", error);
+      console.error("❌ Error details:", {
+        message: error?.message,
+        stack: error?.stack,
+        code: error?.code,
+        statusCode: error?.statusCode,
+        stderr: error?.stderr?.toString?.() || error?.stderr,
+        stdout: error?.stdout?.toString?.() || error?.stdout,
+      });
 
+      // Handle specific error cases
+      const errorMessage = error?.message || error?.toString() || "Unknown error";
+      
       if (
-        error.message?.includes("Private video") ||
-        error.message?.includes("unavailable") ||
-        error.message?.includes("Video unavailable")
+        errorMessage.includes("Private video") ||
+        errorMessage.includes("unavailable") ||
+        errorMessage.includes("Video unavailable") ||
+        errorMessage.includes("Video is private")
       ) {
         return NextResponse.json(
-          { error: "Video is unavailable or private" },
+          { error: "This video is private or unavailable" },
           { status: 404 }
         );
       }
 
-      if (error.message?.includes("403") || error.statusCode === 403) {
+      if (errorMessage.includes("403") || error?.statusCode === 403) {
         return NextResponse.json(
           {
             error:
-              "YouTube blocked the request. Please try again later or use a different video.",
+              "Access denied. The video may be restricted or unavailable in your region.",
           },
           { status: 403 }
         );
       }
 
+      if (errorMessage.includes("yt-dlp") || errorMessage.includes("binary")) {
+        return NextResponse.json(
+          {
+            error: `yt-dlp error: ${errorMessage}. Please check the server logs for details.`,
+          },
+          { status: 500 }
+        );
+      }
+
+      // Return more detailed error message
       return NextResponse.json(
         {
-          error: `Failed to download video: ${
-            error.message || "Unknown error"
-          }`,
+          error: `Failed to download video: ${errorMessage}. Check server logs for more details.`,
+          details: process.env.NODE_ENV === "development" ? {
+            stack: error?.stack,
+            code: error?.code,
+          } : undefined,
         },
-        { status: 400 }
+        { status: 500 }
       );
     }
   } catch (error) {
     console.error("❌ YouTube download error:", error);
+    console.error("❌ Error details:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to download YouTube video",
+        error: error instanceof Error ? error.message : "Failed to download YouTube video",
       },
       { status: 500 }
     );
