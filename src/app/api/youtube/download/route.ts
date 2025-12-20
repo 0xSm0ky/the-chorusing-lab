@@ -305,7 +305,7 @@ export async function POST(request: NextRequest) {
       console.log("📊 Getting video info...");
       console.log("📊 Using binary at:", binPath);
       console.log("📊 Binary exists:", existsSync(binPath));
-      
+
       const infoResult = await youtubeDlExec(url, {
         dumpSingleJson: true,
         noWarnings: true,
@@ -313,7 +313,9 @@ export async function POST(request: NextRequest) {
         preferFreeFormats: true,
         addHeader: ["referer:youtube.com", "user-agent:Mozilla/5.0"],
         // Explicitly set the binary path if we downloaded it
-        ...(binPath && !binPath.includes("node_modules") ? { ytDlpPath: binPath } : {}),
+        ...(binPath && !binPath.includes("node_modules")
+          ? { ytDlpPath: binPath }
+          : {}),
       });
 
       // Handle type: when dumpSingleJson is true, result is a Payload object
@@ -340,7 +342,9 @@ export async function POST(request: NextRequest) {
         preferFreeFormats: true,
         addHeader: ["referer:youtube.com", "user-agent:Mozilla/5.0"],
         // Explicitly set the binary path if we downloaded it
-        ...(binPath && !binPath.includes("node_modules") ? { ytDlpPath: binPath } : {}),
+        ...(binPath && !binPath.includes("node_modules")
+          ? { ytDlpPath: binPath }
+          : {}),
       });
 
       // Read the audio file
@@ -394,8 +398,9 @@ export async function POST(request: NextRequest) {
       });
 
       // Handle specific error cases
-      const errorMessage = error?.message || error?.toString() || "Unknown error";
-      
+      const errorMessage =
+        error?.message || error?.toString() || "Unknown error";
+
       if (
         errorMessage.includes("Private video") ||
         errorMessage.includes("unavailable") ||
@@ -431,10 +436,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: `Failed to download video: ${errorMessage}. Check server logs for more details.`,
-          details: process.env.NODE_ENV === "development" ? {
-            stack: error?.stack,
-            code: error?.code,
-          } : undefined,
+          details:
+            process.env.NODE_ENV === "development"
+              ? {
+                  stack: error?.stack,
+                  code: error?.code,
+                }
+              : undefined,
         },
         { status: 500 }
       );
@@ -447,7 +455,10 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to download YouTube video",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to download YouTube video",
       },
       { status: 500 }
     );
