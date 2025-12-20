@@ -403,8 +403,8 @@ export async function POST(request: NextRequest) {
         // Explicitly exclude MP4/M4V formats
         format:
           "bestaudio[ext=mp3]/bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio[ext=m4a]/bestaudio",
-        // Reject MP4/M4V formats - they cause browser metadata parsing errors
-        rejectTitles: ["mp4", "m4v"],
+        // Use formatSort to prefer non-MP4 formats
+        formatSort: "ext:mp3:prefer,ext:webm:prefer,ext:opus:prefer,ext:ogg:prefer,ext:m4a:prefer",
         // Use output template to ensure we get the right extension
         output: join(tempDir, `audio-${timestamp}.%(ext)s`),
         noWarnings: true,
