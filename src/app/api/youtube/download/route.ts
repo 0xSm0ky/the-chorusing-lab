@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAuthenticatedClient } from "@/lib/supabase";
-import youtubeDlExec from "youtube-dl-exec";
+import youtubeDlExec, { create as createYoutubeDl } from "youtube-dl-exec";
 import {
   createWriteStream,
   readFileSync,
@@ -327,8 +327,8 @@ export async function POST(request: NextRequest) {
       console.log("📊 Using binary at:", finalBinPath);
       console.log("📊 Binary exists:", existsSync(finalBinPath));
 
-      // Always use explicit path if binary is in /tmp or was downloaded
-      const execOptions: any = {
+      // Create a custom youtube-dl-exec instance with our binary path if needed
+      const execOptions = {
         dumpSingleJson: true,
         noWarnings: true,
         noCheckCertificates: true,
@@ -336,17 +336,20 @@ export async function POST(request: NextRequest) {
         addHeader: ["referer:youtube.com", "user-agent:Mozilla/5.0"],
       };
 
-      // If binary is in /tmp or not in node_modules, explicitly set the path
+      // If binary is in /tmp or not in node_modules, use create() to specify custom path
+      let execFunction;
       if (
         finalBinPath &&
         (finalBinPath.includes("/tmp") ||
           !finalBinPath.includes("node_modules"))
       ) {
-        execOptions.ytDlpPath = finalBinPath;
-        console.log("📊 Using explicit binary path:", finalBinPath);
+        console.log("📊 Creating custom youtube-dl-exec instance with path:", finalBinPath);
+        execFunction = createYoutubeDl(finalBinPath);
+      } else {
+        execFunction = youtubeDlExec;
       }
 
-      const infoResult = await youtubeDlExec(url, execOptions);
+      const infoResult = await execFunction(url, execOptions);
 
       // Handle type: when dumpSingleJson is true, result is a Payload object
       const info =
@@ -364,7 +367,7 @@ export async function POST(request: NextRequest) {
       console.log("🎵 Downloading audio...");
       console.log("🎵 Output path:", audioFilePath);
 
-      const downloadOptions: any = {
+      const downloadOptions = {
         extractAudio: true,
         audioFormat: "m4a",
         output: audioFilePath,
@@ -374,17 +377,8 @@ export async function POST(request: NextRequest) {
         addHeader: ["referer:youtube.com", "user-agent:Mozilla/5.0"],
       };
 
-      // If binary is in /tmp or not in node_modules, explicitly set the path
-      if (
-        finalBinPath &&
-        (finalBinPath.includes("/tmp") ||
-          !finalBinPath.includes("node_modules"))
-      ) {
-        downloadOptions.ytDlpPath = finalBinPath;
-        console.log("🎵 Using explicit binary path:", finalBinPath);
-      }
-
-      await youtubeDlExec(url, downloadOptions);
+      // Use the same execFunction we created earlier (with custom binary if needed)
+      await execFunction(url, downloadOptions);
 
       // Read the audio file
       audioBuffer = readFileSync(audioFilePath);
