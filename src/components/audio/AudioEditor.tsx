@@ -159,7 +159,19 @@ export function AudioEditor({ file, sourceUrl }: AudioEditorProps) {
               fileSize: file.size,
             });
             clearTimeout(timeout);
-            const errorMsg = audioError?.message || "Test audio failed to load";
+            let errorMsg = audioError?.message || "Test audio failed to load";
+            
+            // Provide user-friendly message for MP4 metadata errors
+            if (
+              errorMsg.includes("NS_ERROR_DOM_MEDIA_METADATA_ERR") ||
+              errorMsg.includes("Cannot parse metadata") ||
+              (audioError?.code === 4 && file.name.endsWith(".mp4"))
+            ) {
+              errorMsg =
+                "NS_ERROR_DOM_MEDIA_METADATA_ERR - This MP4 file has metadata parsing issues in your browser. " +
+                "Please try downloading the video again, or use a different video if available.";
+            }
+            
             reject(
               new Error(
                 `Audio loading error: ${errorMsg} (Code: ${
@@ -227,7 +239,20 @@ export function AudioEditor({ file, sourceUrl }: AudioEditorProps) {
           console.log("❌ AudioEditor: WaveSurfer error:", err);
           if (err.name === "AbortError") return;
 
-          const errorMessage = err.message || "Failed to load audio";
+          let errorMessage = err.message || "Failed to load audio";
+          
+          // Provide user-friendly message for MP4 metadata errors
+          if (
+            errorMessage.includes("NS_ERROR_DOM_MEDIA_METADATA_ERR") ||
+            errorMessage.includes("Cannot parse metadata") ||
+            errorMessage.includes("metadata parsing")
+          ) {
+            errorMessage =
+              "This audio file has metadata issues that prevent it from loading in your browser. " +
+              "This often happens with MP4 files. Please try downloading the video again, or use a different video if available. " +
+              "If the problem persists, the video may only be available in a format that has compatibility issues.";
+          }
+          
           setError(errorMessage);
           setIsLoading(false);
           initializationRef.current = false;
