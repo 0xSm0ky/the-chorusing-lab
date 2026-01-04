@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Upload, X, AlertCircle, CheckCircle, Music } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Upload, X, AlertCircle, CheckCircle, Music, Library } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { LanguageSelector } from '@/components/ui/LanguageSelector';
+import { AudioPlayer } from '@/components/audio/AudioPlayer';
+import Link from 'next/link';
 import type { AudioMetadata } from '@/types/audio';
 
 interface UploadModalProps {
@@ -26,6 +28,54 @@ interface UploadFormData {
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB - increased from 1MB
 const SUPPORTED_FORMATS = ['mp3', 'wav', 'm4a', 'ogg', 'webm'];
+const STORAGE_KEY = 'clipCreator_lastBasicSettings';
+
+interface BasicSettings {
+  language: string;
+  speakerGender: string;
+  speakerAgeRange: string;
+  speakerDialect: string;
+  sourceUrl: string;
+}
+
+// Helper function to generate title suggestions
+const generateTitleSuggestions = (transcript: string, filename?: string): string[] => {
+  const suggestions: string[] = [];
+  
+  if (transcript && transcript.trim()) {
+    // Extract first 3-5 words from transcript
+    const words = transcript.trim().split(/\s+/).filter(w => w.length > 0);
+    if (words.length > 0) {
+      const firstWords = words.slice(0, Math.min(5, words.length)).join(' ');
+      // Clean up: remove leading punctuation, capitalize first letter
+      const cleaned = firstWords.replace(/^[^\w]+/, '').trim();
+      if (cleaned) {
+        const capitalized = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+        suggestions.push(capitalized);
+        
+        // If transcript is longer, also suggest first 3 words
+        if (words.length > 3) {
+          const shortVersion = words.slice(0, 3).join(' ');
+          const cleanedShort = shortVersion.replace(/^[^\w]+/, '').trim();
+          if (cleanedShort && cleanedShort !== capitalized) {
+            const capitalizedShort = cleanedShort.charAt(0).toUpperCase() + cleanedShort.slice(1);
+            suggestions.push(capitalizedShort);
+          }
+        }
+      }
+    }
+  }
+  
+  // If no transcript or suggestions, use filename
+  if (suggestions.length === 0 && filename) {
+    const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+    if (nameWithoutExt) {
+      suggestions.push(nameWithoutExt);
+    }
+  }
+  
+  return suggestions.slice(0, 3); // Return max 3 suggestions
+};
 
 export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
   const { user, getAuthHeaders } = useAuth();
@@ -35,16 +85,56 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
   const [calculatedDuration, setCalculatedDuration] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
   
+  // Load basic settings from sessionStorage on mount
+  const loadBasicSettings = (): BasicSettings => {
+    try {
+      const stored = sessionStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (error) {
+      console.error('Failed to load basic settings from sessionStorage:', error);
+    }
+    return {
+      language: '',
+      speakerGender: '',
+      speakerAgeRange: '',
+      speakerDialect: '',
+      sourceUrl: '',
+    };
+  };
+
+  const basicSettings = loadBasicSettings();
+
+  // Validate and cast speakerGender to the expected type
+  const getValidSpeakerGender = (value: string): 'male' | 'female' | 'other' | '' => {
+    if (value === 'male' || value === 'female' || value === 'other' || value === '') {
+      return value;
+    }
+    return '';
+  };
+
+  // Validate and cast speakerAgeRange to the expected type
+  const getValidSpeakerAgeRange = (value: string): 'teen' | 'younger-adult' | 'adult' | 'senior' | '' => {
+    if (value === 'teen' || value === 'younger-adult' || value === 'adult' || value === 'senior' || value === '') {
+      return value;
+    }
+    return '';
+  };
+
   const [formData, setFormData] = useState<UploadFormData>({
     title: '',
     duration: '',
-    language: '', // No default language selected
-    speakerGender: '',
-    speakerAgeRange: '',
-    speakerDialect: '',
+    language: basicSettings.language || '',
+    speakerGender: getValidSpeakerGender(basicSettings.speakerGender || ''),
+    speakerAgeRange: getValidSpeakerAgeRange(basicSettings.speakerAgeRange || ''),
+    speakerDialect: basicSettings.speakerDialect || '',
     transcript: '',
-    sourceUrl: '',
+    sourceUrl: basicSettings.sourceUrl || '',
     tags: '',
   });
 
@@ -77,10 +167,7 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
     return null;
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = (file: File) => {
     console.log('🔍 FILE DEBUG START');
     console.log('File name:', file.name);
     console.log('File size:', file.size);
@@ -97,6 +184,13 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
 
     setSelectedFile(file);
     setError(null);
+    
+    // Create object URL for audio playback
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+    }
+    const newAudioUrl = URL.createObjectURL(file);
+    setAudioUrl(newAudioUrl);
     
     // Auto-fill title from filename if empty
     if (!formData.title) {
@@ -229,6 +323,36 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
     console.log('🔍 FILE DEBUG END');
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      processFile(file);
+    }
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -297,10 +421,23 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
         throw new Error(errorData.error || 'Upload failed');
       }
 
+      // Save basic settings to sessionStorage
+      try {
+        const basicSettingsToSave: BasicSettings = {
+          language: formData.language,
+          speakerGender: formData.speakerGender,
+          speakerAgeRange: formData.speakerAgeRange,
+          speakerDialect: formData.speakerDialect,
+          sourceUrl: formData.sourceUrl,
+        };
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(basicSettingsToSave));
+      } catch (error) {
+        console.error('Failed to save basic settings to sessionStorage:', error);
+      }
+
       // Success!
+      setShowSuccess(true);
       onSuccess?.();
-      onClose();
-      resetForm();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Upload failed');
     } finally {
@@ -311,15 +448,21 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
   const resetForm = () => {
     setSelectedFile(null);
     setCalculatedDuration(null);
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+    // Reload basic settings from sessionStorage
+    const basicSettings = loadBasicSettings();
     setFormData({
       title: '',
       duration: '',
-      language: '',
-      speakerGender: '',
-      speakerAgeRange: '',
-      speakerDialect: '',
+      language: basicSettings.language || '',
+      speakerGender: getValidSpeakerGender(basicSettings.speakerGender || ''),
+      speakerAgeRange: getValidSpeakerAgeRange(basicSettings.speakerAgeRange || ''),
+      speakerDialect: basicSettings.speakerDialect || '',
       transcript: '',
-      sourceUrl: '',
+      sourceUrl: basicSettings.sourceUrl || '',
       tags: '',
     });
     setError(null);
@@ -327,6 +470,15 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
       fileInputRef.current.value = '';
     }
   };
+
+  // Cleanup audio URL on unmount
+  useEffect(() => {
+    return () => {
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    };
+  }, [audioUrl]);
 
   if (!isOpen) return null;
 
@@ -354,7 +506,16 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Audio File *
             </label>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
+            <div 
+              className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                isDragging 
+                  ? 'border-indigo-500 bg-indigo-50' 
+                  : 'border-gray-300 hover:border-gray-400'
+              }`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
               <input
                 ref={fileInputRef}
                 type="file"
@@ -397,6 +558,17 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
             </div>
           </div>
 
+          {/* Audio Player */}
+          {selectedFile && audioUrl && (
+            <div className="bg-gray-50 rounded-lg p-4">
+              <AudioPlayer
+                url={audioUrl}
+                title={selectedFile.name}
+                showControls={true}
+              />
+            </div>
+          )}
+
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-md flex items-center gap-2 text-red-700">
               <AlertCircle className="w-4 h-4" />
@@ -422,6 +594,24 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
             {calculatedDuration && (
               <p className="text-xs text-gray-500 mt-1">Duration: {calculatedDuration.toFixed(1)} seconds</p>
             )}
+            {/* Title Suggestions */}
+            {(!formData.title || formData.title === selectedFile?.name.replace(/\.[^/.]+$/, '')) && (() => {
+              const suggestions = generateTitleSuggestions(formData.transcript, selectedFile?.name);
+              return suggestions.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {suggestions.map((suggestion, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, title: suggestion }))}
+                      className="px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded-md hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                    >
+                      Use: {suggestion}
+                    </button>
+                  ))}
+                </div>
+              ) : null;
+            })()}
           </div>
 
           {/* Language */}
@@ -571,6 +761,55 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
           </div>
         </form>
       </div>
+
+      {/* Success Notification */}
+      {showSuccess && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                  <CheckCircle className="w-6 h-6 text-green-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Clip Submitted Successfully!
+                  </h3>
+                </div>
+              </div>
+
+              <p className="text-gray-700 mb-6">
+                Continue submitting clips, then find them all in the Clip Library.
+              </p>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowSuccess(false);
+                    resetForm();
+                    onClose();
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                >
+                  Continue
+                </button>
+                <Link
+                  href="/library"
+                  onClick={() => {
+                    setShowSuccess(false);
+                    resetForm();
+                    onClose();
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 flex items-center gap-2"
+                >
+                  <Library className="w-4 h-4" />
+                  Go to Library
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
