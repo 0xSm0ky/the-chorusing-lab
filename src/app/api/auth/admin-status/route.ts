@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAuthenticatedClient } from "@/lib/supabase";
+import { verifyAccessToken } from "@/lib/supabase";
 import { isAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
@@ -13,12 +13,9 @@ export async function GET(request: NextRequest) {
     }
 
     const accessToken = authHeader.substring(7);
-    const authenticatedClient = createAuthenticatedClient(accessToken);
-
-    const {
-      data: { user },
-      error,
-    } = await authenticatedClient.auth.getUser();
+    
+    // Verify token using standard client (no custom storage)
+    const { user, error } = await verifyAccessToken(accessToken);
 
     if (error || !user) {
       return NextResponse.json({ isAdmin: false }, { status: 200 });

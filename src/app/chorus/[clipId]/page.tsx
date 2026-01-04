@@ -19,7 +19,7 @@ interface ClipWithUrl extends AudioClip {
 export default function ChorusPage() {
   const { user, getAuthHeaders } = useAuth();
   const params = useParams();
-  const clipId = params.clipId as string;
+  const clipId = params?.clipId as string;
 
   const [clip, setClip] = useState<ClipWithUrl | null>(null);
   const [loading, setLoading] = useState(true);

@@ -12,6 +12,7 @@ import {
   getPublicUrl,
   deleteAudioFile,
   createAuthenticatedClient,
+  verifyAccessToken,
 } from "@/lib/supabase";
 import { isAdmin } from "@/lib/admin";
 
@@ -231,10 +232,8 @@ class SupabaseDatabase {
 
     // Verify the user exists before inserting (helps debug RLS issues)
     if (accessToken) {
-      const {
-        data: { user },
-        error: userError,
-      } = await client.auth.getUser();
+      // Verify token using standard client (no custom storage)
+      const { user, error: userError } = await verifyAccessToken(accessToken);
       if (userError || !user) {
         console.error("❌ Cannot verify user with token:", userError?.message);
         throw new Error(

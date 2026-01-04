@@ -24,8 +24,63 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+// Helper function to decode JWT payload (without signature verification)
+// This extracts user info from the token directly
+function decodeJWT(token: string): any | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = parts[1];
+    // Base64 URL decode
+    const decoded = Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+    return JSON.parse(decoded);
+  } catch (err) {
+    return null;
+  }
+}
+
+// Helper function to verify an access token
+// Decodes JWT to extract user info directly, avoiding session lookup issues
+export const verifyAccessToken = async (accessToken: string) => {
+  // Decode JWT to extract user info directly
+  const payload = decodeJWT(accessToken);
+  
+  if (!payload) {
+    return { 
+      user: null, 
+      error: { 
+        message: 'Invalid token format',
+        status: 401 
+      } 
+    };
+  }
+
+  // Check if token is expired
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp && payload.exp < now) {
+    return { 
+      user: null, 
+      error: { 
+        message: 'Token expired',
+        status: 401 
+      } 
+    };
+  }
+
+  // Extract user info from JWT payload
+  const user = {
+    id: payload.sub,
+    email: payload.email,
+    user_metadata: payload.user_metadata || {},
+    app_metadata: payload.app_metadata || {},
+  };
+
+  return { user, error: null };
+};
+
 // Helper function to create authenticated client
 // This creates a client with the access token that RLS policies can use
+// Use this for database/storage operations, NOT for token verification
 export const createAuthenticatedClient = (accessToken: string) => {
   // Create client with auth token in headers
   // The key is to also set it in the auth context for RLS

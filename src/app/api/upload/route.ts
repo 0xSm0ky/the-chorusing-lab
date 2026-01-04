@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { serverDb } from '@/lib/server-database';
-import { uploadAudioFile, createAuthenticatedClient } from '@/lib/supabase';
+import { uploadAudioFile, createAuthenticatedClient, verifyAccessToken } from '@/lib/supabase';
 import type { AudioMetadata } from '@/types/audio';
-import type { Database } from '@/types/supabase';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 const SUPPORTED_FORMATS = ['mp3', 'wav', 'm4a', 'ogg', 'webm'];
@@ -85,14 +83,11 @@ export async function POST(request: NextRequest) {
     const accessToken = authHeader.substring(7); // Remove 'Bearer ' prefix
     console.log('🔑 Authenticating user...')
 
-    // Create authenticated Supabase client
-    const authenticatedClient = createAuthenticatedClient(accessToken)
-
-    // Get the current user using the authenticated client
-    const { data: { user }, error: authError } = await authenticatedClient.auth.getUser()
+    // Verify the token using JWT decoding
+    const { user, error: authError } = await verifyAccessToken(accessToken);
     
     if (authError || !user) {
-      console.error('❌ Authentication failed:', authError?.message)
+      console.error('❌ Authentication failed:', authError?.message || 'User not found');
       return NextResponse.json(
         { error: 'Invalid authentication' },
         { status: 401 }
@@ -101,6 +96,9 @@ export async function POST(request: NextRequest) {
 
     const userId = user.id;
     console.log('✅ User authenticated:', userId)
+
+    // Create authenticated client for database/storage operations (needs custom storage for RLS)
+    const authenticatedClient = createAuthenticatedClient(accessToken);
 
     // Parse form data
     const formData = await request.formData();

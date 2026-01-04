@@ -78,7 +78,7 @@ const generateTitleSuggestions = (transcript: string, filename?: string): string
 };
 
 export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
-  const { user, getAuthHeaders } = useAuth();
+  const { user, getAuthHeaders, session } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -365,7 +365,12 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!selectedFile || !user) return;
+    if (!selectedFile || !user || !session?.access_token) {
+      if (!session?.access_token) {
+        setError("Please wait for authentication to complete, or try refreshing the page.");
+      }
+      return;
+    }
 
     // Validate required fields
     if (!formData.title.trim()) {

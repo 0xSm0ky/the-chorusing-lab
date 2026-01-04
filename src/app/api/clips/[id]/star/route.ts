@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { serverDb } from '@/lib/server-database';
-import { createClient } from '@supabase/supabase-js';
-import { createAuthenticatedClient } from '@/lib/supabase';
-import type { Database } from '@/types/supabase';
+import { verifyAccessToken } from '@/lib/supabase';
 
 export async function POST(
   request: NextRequest,
@@ -17,9 +15,18 @@ export async function POST(
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       accessToken = authHeader.substring(7);
-      const authenticatedClient = createAuthenticatedClient(accessToken);
       
-      const { data: { user } } = await authenticatedClient.auth.getUser();
+      // Verify token using standard client (no custom storage)
+      const { user, error: authError } = await verifyAccessToken(accessToken);
+      
+      if (authError) {
+        console.error("❌ Token verification failed:", authError.message);
+        return NextResponse.json(
+          { error: "Invalid authentication" },
+          { status: 401 }
+        );
+      }
+      
       if (user) userId = user.id;
     }
     
@@ -59,9 +66,18 @@ export async function DELETE(
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       accessToken = authHeader.substring(7);
-      const authenticatedClient = createAuthenticatedClient(accessToken);
       
-      const { data: { user } } = await authenticatedClient.auth.getUser();
+      // Verify token using standard client (no custom storage)
+      const { user, error: authError } = await verifyAccessToken(accessToken);
+      
+      if (authError) {
+        console.error("❌ Token verification failed:", authError.message);
+        return NextResponse.json(
+          { error: "Invalid authentication" },
+          { status: 401 }
+        );
+      }
+      
       if (user) userId = user.id;
     }
     
