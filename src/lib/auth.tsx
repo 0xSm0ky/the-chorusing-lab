@@ -42,18 +42,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Use a ref to track if component is mounted to prevent state updates after unmount
   const isMounted = useRef(true);
-  // Track last processed session token to avoid redundant work
-  const lastProcessedToken = useRef<string | null>(null);
-  // Debounce timer for auth state changes
-  const authChangeTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
-      if (authChangeTimer.current) {
-        clearTimeout(authChangeTimer.current);
-      }
     };
   }, []);
 
@@ -182,18 +175,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [checkAdminStatus]
   );
 
-  // FIXED: Memoize auth headers to return stable object references
-  const getAuthHeaders = useMemo((): (() => HeadersInit) => {
-    // Create stable header objects
-    const emptyHeaders = {};
-    const authHeaders = session?.access_token
-      ? {
-          Authorization: `Bearer ${session.access_token}`,
-        }
-      : emptyHeaders;
-
-    // Return a function that always returns the same object reference
-    return () => authHeaders;
+  // Memoize auth headers function to return stable object references
+  const getAuthHeaders = useCallback((): HeadersInit => {
+    // Return headers directly based on current session
+    if (session?.access_token) {
+      return {
+        Authorization: `Bearer ${session.access_token}`,
+      };
+    }
+    return {};
   }, [session?.access_token]);
 
   // Handle auth state changes
@@ -231,7 +221,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               isLoading: false, // Stop loading immediately
               error: null,
             });
-            lastProcessedToken.current = initialSession.access_token;
           }
 
           // Then verify and update with full profile/admin status in background
@@ -267,93 +256,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initializeAuth();
 
-    // Listen for auth changes with debouncing and session comparison
+    // Listen for auth changes - update immediately for reliability
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
-      // Clear any pending debounce timer
-      if (authChangeTimer.current) {
-        clearTimeout(authChangeTimer.current);
+      if (!mounted) return;
+
+      console.log("Auth state change:", event);
+
+      // For token refresh events, skip admin check to speed things up
+      const skipAdminCheck = event === "TOKEN_REFRESHED";
+
+      // Update session immediately
+      if (mounted) {
+        setSession(currentSession);
       }
 
-      // Check if session actually changed by comparing access tokens
-      const currentToken = currentSession?.access_token || null;
-      if (
-        currentToken === lastProcessedToken.current &&
-        event !== "SIGNED_OUT"
-      ) {
-        // Session hasn't meaningfully changed, skip processing
-        return;
-      }
-
-      // Debounce rapid auth state changes (e.g., token refresh)
-      authChangeTimer.current = setTimeout(async () => {
-        if (!mounted) return;
-
-        console.log("Auth state change:", event);
-
-        // For token refresh events, skip admin check to speed things up
-        const skipAdminCheck = event === "TOKEN_REFRESHED";
-
-        // Update session immediately
-        if (mounted) {
-          setSession(currentSession);
-          lastProcessedToken.current = currentToken;
-        }
-
-        // If we have a session, update user info
-        if (currentSession?.access_token) {
-          // For SIGNED_IN events, show optimistic update first
-          if (event === "SIGNED_IN" && mounted) {
-            const optimisticUser: User = {
-              id: currentSession.user.id,
-              username:
-                currentSession.user.user_metadata?.username || "Unknown",
-              email: currentSession.user.email || "Unknown",
-              createdAt: currentSession.user.created_at,
-              isAdmin: false,
-            };
-            setAuthState({
-              user: optimisticUser,
-              isLoading: false,
-              error: null,
-            });
-          }
-
-          // Then get full user info (with optional admin check)
-          const user = await sessionToUser(currentSession, {
-            skipAdminCheck,
+      // If we have a session, update user info
+      if (currentSession?.access_token) {
+        // For SIGNED_IN events, show optimistic update first
+        if (event === "SIGNED_IN" && mounted) {
+          const optimisticUser: User = {
+            id: currentSession.user.id,
+            username:
+              currentSession.user.user_metadata?.username || "Unknown",
+            email: currentSession.user.email || "Unknown",
+            createdAt: currentSession.user.created_at,
+            isAdmin: false,
+          };
+          setAuthState({
+            user: optimisticUser,
+            isLoading: false,
+            error: null,
           });
-
-          if (mounted) {
-            setAuthState({
-              user,
-              isLoading: false,
-              error: null,
-            });
-          }
-        } else {
-          // No session (signed out)
-          if (mounted) {
-            setAuthState({
-              user: null,
-              isLoading: false,
-              error: null,
-            });
-            lastProcessedToken.current = null;
-            // Clear admin cache on logout
-            adminStatusCache.clear();
-          }
         }
-      }, event === "TOKEN_REFRESHED" ? 100 : 0); // Small delay for token refresh, immediate for other events
+
+        // Then get full user info (with optional admin check)
+        const user = await sessionToUser(currentSession, {
+          skipAdminCheck,
+        });
+
+        if (mounted) {
+          setAuthState({
+            user,
+            isLoading: false,
+            error: null,
+          });
+        }
+      } else {
+        // No session (signed out)
+        if (mounted) {
+          setAuthState({
+            user: null,
+            isLoading: false,
+            error: null,
+          });
+          // Clear admin cache on logout
+          adminStatusCache.clear();
+        }
+      }
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
-      if (authChangeTimer.current) {
-        clearTimeout(authChangeTimer.current);
-      }
     };
   }, [sessionToUser]);
 
@@ -385,7 +351,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading: false, // Stop loading immediately
         error: null,
       });
-      lastProcessedToken.current = data.session.access_token;
 
       // Fetch full user info in background (profile + admin status)
       // onAuthStateChange will also fire and reconcile, but we have immediate feedback
@@ -475,7 +440,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isLoading: false, // Stop loading immediately
           error: null,
         });
-        lastProcessedToken.current = data.session.access_token;
 
         // Fetch full user info in background (profile + admin status)
         // onAuthStateChange will also fire and reconcile, but we have immediate feedback

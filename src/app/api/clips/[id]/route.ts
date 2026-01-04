@@ -3,9 +3,7 @@ import { serverDb } from "@/lib/server-database";
 import { unlink } from "fs/promises";
 import path from "path";
 import type { AudioMetadata } from "@/types/audio";
-import { createClient } from "@supabase/supabase-js";
-import { createAuthenticatedClient } from "@/lib/supabase";
-import type { Database } from "@/types/supabase";
+import { verifyAccessToken } from "@/lib/supabase";
 import { isAdmin } from "@/lib/admin";
 
 const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
@@ -23,11 +21,18 @@ export async function PUT(
 
     if (authHeader && authHeader.startsWith("Bearer ")) {
       accessToken = authHeader.substring(7);
-      const authenticatedClient = createAuthenticatedClient(accessToken);
-
-      const {
-        data: { user },
-      } = await authenticatedClient.auth.getUser();
+      
+      // Verify token using standard client (no custom storage)
+      const { user, error: authError } = await verifyAccessToken(accessToken);
+      
+      if (authError) {
+        console.error("❌ Token verification failed:", authError.message);
+        return NextResponse.json(
+          { error: "Invalid authentication" },
+          { status: 401 }
+        );
+      }
+      
       if (user) userId = user.id;
     }
 
@@ -146,11 +151,18 @@ export async function DELETE(
 
     if (authHeader && authHeader.startsWith("Bearer ")) {
       accessToken = authHeader.substring(7);
-      const authenticatedClient = createAuthenticatedClient(accessToken);
-
-      const {
-        data: { user },
-      } = await authenticatedClient.auth.getUser();
+      
+      // Verify token using standard client (no custom storage)
+      const { user, error: authError } = await verifyAccessToken(accessToken);
+      
+      if (authError) {
+        console.error("❌ Token verification failed:", authError.message);
+        return NextResponse.json(
+          { error: "Invalid authentication" },
+          { status: 401 }
+        );
+      }
+      
       if (user) userId = user.id;
     }
 

@@ -56,6 +56,8 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   // Initialize state from URL params
   const [filters, setFilters] = useState<AudioFilters>(() => {
     const urlFilters: AudioFilters = {};
+    if (!searchParams) return urlFilters;
+    
     const language = searchParams.get("language");
     const speakerGender = searchParams.get("speakerGender");
     const speakerAgeRange = searchParams.get("speakerAgeRange");
@@ -70,6 +72,8 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   });
 
   const [sort, setSort] = useState<AudioSort>(() => {
+    if (!searchParams) return { field: "createdAt", direction: "desc" };
+    
     const field = searchParams.get("sortField") || "createdAt";
     const direction = (searchParams.get("sortDirection") || "desc") as
       | "asc"
@@ -78,14 +82,14 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   });
 
   const [searchTerm, setSearchTerm] = useState(
-    () => searchParams.get("search") || ""
+    () => searchParams?.get("search") || ""
   );
   const [showFilters, setShowFilters] = useState(true);
   const [showStarred, setShowStarred] = useState(
-    () => searchParams.get("starred") === "true"
+    () => searchParams?.get("starred") === "true"
   );
   const [showMyUploads, setShowMyUploads] = useState(
-    () => searchParams.get("myUploads") === "true"
+    () => searchParams?.get("myUploads") === "true"
   );
 
   // Use refs to track latest values for debounced updates

@@ -91,7 +91,7 @@ export function ClipExtractModal({
   initialSourceUrl = "",
   onSuccess,
 }: ClipExtractModalProps) {
-  const { user, getAuthHeaders } = useAuth();
+  const { user, getAuthHeaders, session } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -279,7 +279,10 @@ export function ClipExtractModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!user) return;
+    if (!user || !session?.access_token) {
+      setError("Please wait for authentication to complete, or try refreshing the page.");
+      return;
+    }
 
     // Validate required fields
     if (!formData.title.trim()) {
