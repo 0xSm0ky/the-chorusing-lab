@@ -14,6 +14,8 @@ import {
   AlertCircle,
   Repeat,
   Gauge,
+  Plus,
+  Minus,
 } from "lucide-react";
 import type { AudioClip } from "@/types/audio";
 
@@ -386,7 +388,7 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
     setIsPlaying(true);
   }, [isReady, region]);
 
-  const changeVolume = (v: number) => {
+  const changeVolume = useCallback((v: number) => {
     const ws = wsRef.current;
     if (!isReady || !ws) return;
     // Clamp volume to 0-3.0 (0-300%)
@@ -439,7 +441,7 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
       ws.setVolume(volClamped);
       setVolume(volClamped);
     }
-  };
+  }, [isReady]);
 
   const changePlaybackRate = useCallback(
     (rate: number) => {
@@ -484,6 +486,53 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
     }
     setRegion(null);
   }, []);
+
+  /* ------------------------------------------------------------------ */
+  /* Slider control buttons                                             */
+  /* ------------------------------------------------------------------ */
+  const handleVolumeAdjust = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      const delta = e.shiftKey ? 0.1 : 0.05; // 10% or 5%
+      const newVolume = volume + delta;
+      changeVolume(newVolume);
+    },
+    [volume, changeVolume]
+  );
+
+  const handleVolumeDecrease = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      const delta = e.shiftKey ? 0.1 : 0.05; // 10% or 5%
+      const newVolume = volume - delta;
+      changeVolume(newVolume);
+    },
+    [volume, changeVolume]
+  );
+
+  const handleVolumeReset = useCallback(() => {
+    changeVolume(1.0);
+  }, [changeVolume]);
+
+  const handleSpeedAdjust = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      const delta = e.shiftKey ? 0.1 : 0.05; // 10% or 5%
+      const newRate = playbackRate + delta;
+      changePlaybackRate(newRate);
+    },
+    [playbackRate, changePlaybackRate]
+  );
+
+  const handleSpeedDecrease = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      const delta = e.shiftKey ? 0.1 : 0.05; // 10% or 5%
+      const newRate = playbackRate - delta;
+      changePlaybackRate(newRate);
+    },
+    [playbackRate, changePlaybackRate]
+  );
+
+  const handleSpeedReset = useCallback(() => {
+    changePlaybackRate(1.0);
+  }, [changePlaybackRate]);
 
   /* ------------------------------------------------------------------ */
   /* Keyboard shortcuts                                                 */
@@ -703,39 +752,95 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
 
             <div className="flex items-center gap-4">
               {/* Volume Control */}
-              <div className="flex items-center gap-2">
-                <Volume2 className="w-4 h-4 text-gray-500" />
-                <input
-                  type="range"
-                  min="0"
-                  max="3"
-                  step="0.05"
-                  value={volume}
-                  onChange={(e) => changeVolume(parseFloat(e.target.value))}
-                  className="w-20"
-                />
-                <span className="text-xs text-gray-600 min-w-[3rem]">
-                  {Math.round(volume * 100)}%
-                </span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-gray-500" />
+                  <input
+                    type="range"
+                    min="0"
+                    max="3"
+                    step="0.05"
+                    value={volume}
+                    onChange={(e) => changeVolume(parseFloat(e.target.value))}
+                    className="w-20"
+                  />
+                  <span className="text-xs text-gray-600 min-w-[3rem]">
+                    {Math.round(volume * 100)}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-center gap-1 ml-6 w-20">
+                  <button
+                    onClick={handleVolumeDecrease}
+                    className="inline-flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                    aria-label="Decrease volume"
+                    title="Decrease volume (Shift for 10%)"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={handleVolumeAdjust}
+                    className="inline-flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                    aria-label="Increase volume"
+                    title="Increase volume (Shift for 10%)"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={handleVolumeReset}
+                    className="inline-flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                    aria-label="Reset volume to 100%"
+                    title="Reset volume to 100%"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
 
               {/* Speed Control */}
-              <div className="flex items-center gap-2">
-                <Gauge className="w-4 h-4 text-gray-500" />
-                <input
-                  type="range"
-                  min="0.5"
-                  max="2.0"
-                  step="0.05"
-                  value={playbackRate}
-                  onChange={(e) =>
-                    changePlaybackRate(parseFloat(e.target.value))
-                  }
-                  className="w-20"
-                />
-                <span className="text-xs text-gray-600 min-w-[2.5rem]">
-                  {playbackRate.toFixed(2)}x
-                </span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <Gauge className="w-4 h-4 text-gray-500" />
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.0"
+                    step="0.05"
+                    value={playbackRate}
+                    onChange={(e) =>
+                      changePlaybackRate(parseFloat(e.target.value))
+                    }
+                    className="w-20"
+                  />
+                  <span className="text-xs text-gray-600 min-w-[2.5rem]">
+                    {playbackRate.toFixed(2)}x
+                  </span>
+                </div>
+                <div className="flex items-center justify-center gap-1 ml-6 w-20">
+                  <button
+                    onClick={handleSpeedDecrease}
+                    className="inline-flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                    aria-label="Decrease speed"
+                    title="Decrease speed (Shift for 10%)"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={handleSpeedAdjust}
+                    className="inline-flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                    aria-label="Increase speed"
+                    title="Increase speed (Shift for 10%)"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={handleSpeedReset}
+                    className="inline-flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                    aria-label="Reset speed to 1.0x"
+                    title="Reset speed to 1.0x"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
