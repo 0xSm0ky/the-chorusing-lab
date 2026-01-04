@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { X, AlertCircle, CheckCircle, Scissors, Play } from "lucide-react";
+import { X, AlertCircle, CheckCircle, Scissors, Library } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { LanguageSelector } from "@/components/ui/LanguageSelector";
+import { AudioPlayer } from "@/components/audio/AudioPlayer";
+import Link from "next/link";
 import type { AudioMetadata } from "@/types/audio";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/supabase";
@@ -30,6 +32,55 @@ interface ExtractFormData {
   tags: string;
 }
 
+const STORAGE_KEY = 'clipCreator_lastBasicSettings';
+
+interface BasicSettings {
+  language: string;
+  speakerGender: string;
+  speakerAgeRange: string;
+  speakerDialect: string;
+  sourceUrl: string;
+}
+
+// Helper function to generate title suggestions
+const generateTitleSuggestions = (transcript: string, filename?: string): string[] => {
+  const suggestions: string[] = [];
+  
+  if (transcript && transcript.trim()) {
+    // Extract first 3-5 words from transcript
+    const words = transcript.trim().split(/\s+/).filter(w => w.length > 0);
+    if (words.length > 0) {
+      const firstWords = words.slice(0, Math.min(5, words.length)).join(' ');
+      // Clean up: remove leading punctuation, capitalize first letter
+      const cleaned = firstWords.replace(/^[^\w]+/, '').trim();
+      if (cleaned) {
+        const capitalized = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+        suggestions.push(capitalized);
+        
+        // If transcript is longer, also suggest first 3 words
+        if (words.length > 3) {
+          const shortVersion = words.slice(0, 3).join(' ');
+          const cleanedShort = shortVersion.replace(/^[^\w]+/, '').trim();
+          if (cleanedShort && cleanedShort !== capitalized) {
+            const capitalizedShort = cleanedShort.charAt(0).toUpperCase() + cleanedShort.slice(1);
+            suggestions.push(capitalizedShort);
+          }
+        }
+      }
+    }
+  }
+  
+  // If no transcript or suggestions, use filename
+  if (suggestions.length === 0 && filename) {
+    const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+    if (nameWithoutExt) {
+      suggestions.push(nameWithoutExt);
+    }
+  }
+  
+  return suggestions.slice(0, 3); // Return max 3 suggestions
+};
+
 export function ClipExtractModal({
   isOpen,
   onClose,
@@ -46,15 +97,37 @@ export function ClipExtractModal({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [mp3Blob, setMp3Blob] = useState<Blob | null>(null);
   const [converting, setConverting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // Load basic settings from sessionStorage
+  const loadBasicSettings = (): BasicSettings => {
+    try {
+      const stored = sessionStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (error) {
+      console.error('Failed to load basic settings from sessionStorage:', error);
+    }
+    return {
+      language: '',
+      speakerGender: '',
+      speakerAgeRange: '',
+      speakerDialect: '',
+      sourceUrl: '',
+    };
+  };
+
+  const basicSettings = loadBasicSettings();
 
   const [formData, setFormData] = useState<ExtractFormData>({
     title: `Clip from ${originalFilename.replace(/\.[^/.]+$/, "")}`,
-    language: "", // No default language selected
-    speakerGender: "",
-    speakerAgeRange: "",
-    speakerDialect: "",
+    language: basicSettings.language || "",
+    speakerGender: (basicSettings.speakerGender as any) || "",
+    speakerAgeRange: (basicSettings.speakerAgeRange as any) || "",
+    speakerDialect: basicSettings.speakerDialect || "",
     transcript: initialTranscript,
-    sourceUrl: initialSourceUrl,
+    sourceUrl: basicSettings.sourceUrl || initialSourceUrl,
     tags: "",
   });
 
@@ -284,10 +357,23 @@ export function ClipExtractModal({
       const result = await response.json();
       console.log("Upload successful:", result);
 
+      // Save basic settings to sessionStorage
+      try {
+        const basicSettingsToSave: BasicSettings = {
+          language: formData.language,
+          speakerGender: formData.speakerGender,
+          speakerAgeRange: formData.speakerAgeRange,
+          speakerDialect: formData.speakerDialect,
+          sourceUrl: formData.sourceUrl,
+        };
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(basicSettingsToSave));
+      } catch (error) {
+        console.error('Failed to save basic settings to sessionStorage:', error);
+      }
+
       // Success!
+      setShowSuccess(true);
       onSuccess?.();
-      onClose();
-      resetForm();
     } catch (error) {
       console.error("Upload error:", error);
       setError(error instanceof Error ? error.message : "Upload failed");
@@ -297,14 +383,16 @@ export function ClipExtractModal({
   };
 
   const resetForm = () => {
+    // Reload basic settings from sessionStorage
+    const basicSettings = loadBasicSettings();
     setFormData({
       title: "",
-      language: "",
-      speakerGender: "",
-      speakerAgeRange: "",
-      speakerDialect: "",
+      language: basicSettings.language || "",
+      speakerGender: (basicSettings.speakerGender as any) || "",
+      speakerAgeRange: (basicSettings.speakerAgeRange as any) || "",
+      speakerDialect: basicSettings.speakerDialect || "",
       transcript: initialTranscript || "",
-      sourceUrl: initialSourceUrl || "",
+      sourceUrl: basicSettings.sourceUrl || initialSourceUrl || "",
       tags: "",
     });
     setError(null);
@@ -356,11 +444,12 @@ export function ClipExtractModal({
 
             {audioUrl && !converting ? (
               <div className="space-y-3">
-                {/* Simple HTML5 audio player for preview */}
-                <audio controls className="w-full" preload="metadata">
-                  <source src={audioUrl} type="audio/mpeg" />
-                  Your browser does not support the audio element.
-                </audio>
+                {/* Full AudioPlayer component */}
+                <AudioPlayer
+                  url={audioUrl}
+                  title="Extracted Clip Preview"
+                  showControls={true}
+                />
 
                 {/* Audio info */}
                 <div className="flex items-center gap-4 text-sm text-gray-600">
@@ -411,6 +500,24 @@ export function ClipExtractModal({
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               placeholder="Enter clip title"
             />
+            {/* Title Suggestions */}
+            {(!formData.title || formData.title.startsWith('Clip from')) && (() => {
+              const suggestions = generateTitleSuggestions(formData.transcript, originalFilename);
+              return suggestions.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {suggestions.map((suggestion, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, title: suggestion }))}
+                      className="px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded-md hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                    >
+                      Use: {suggestion}
+                    </button>
+                  ))}
+                </div>
+              ) : null;
+            })()}
           </div>
 
           {/* Language */}
@@ -588,6 +695,55 @@ export function ClipExtractModal({
           </div>
         </form>
       </div>
+
+      {/* Success Notification */}
+      {showSuccess && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                  <CheckCircle className="w-6 h-6 text-green-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Clip Submitted Successfully!
+                  </h3>
+                </div>
+              </div>
+
+              <p className="text-gray-700 mb-6">
+                Continue submitting clips, then find them all in the Clip Library.
+              </p>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowSuccess(false);
+                    resetForm();
+                    onClose();
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                >
+                  Continue
+                </button>
+                <Link
+                  href="/library"
+                  onClick={() => {
+                    setShowSuccess(false);
+                    resetForm();
+                    onClose();
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 flex items-center gap-2"
+                >
+                  <Library className="w-4 h-4" />
+                  Go to Library
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

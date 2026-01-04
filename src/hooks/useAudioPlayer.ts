@@ -27,6 +27,7 @@ export function useAudioPlayer({
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const isMountedRef = useRef(true);
   const isInitializedRef = useRef(false); // Use ref instead of state to avoid dependency loop
+  const isLoopingRef = useRef(false); // Track looping state with ref
 
   // Store callbacks in refs to avoid re-initialization
   const callbacksRef = useRef({ onReady, onPlay, onPause, onFinish, onError });
@@ -123,14 +124,25 @@ export function useAudioPlayer({
         });
 
         wavesurfer.on("finish", () => {
-          safeSetState(() => {
-            setPlaybackState((prev) => ({
-              ...prev,
-              isPlaying: false,
-              currentTime: 0,
-            }));
-          });
-          callbacksRef.current.onFinish?.();
+          // Check if looping is enabled using ref
+          if (isLoopingRef.current) {
+            // Restart playback from beginning
+            try {
+              wavesurfer.seekTo(0);
+              wavesurfer.play();
+            } catch (err) {
+              console.debug("Loop restart error:", err);
+            }
+          } else {
+            safeSetState(() => {
+              setPlaybackState((prev) => ({
+                ...prev,
+                isPlaying: false,
+                currentTime: 0,
+              }));
+            });
+            callbacksRef.current.onFinish?.();
+          }
         });
 
         wavesurfer.on("timeupdate", (currentTime: number) => {
@@ -311,6 +323,17 @@ export function useAudioPlayer({
     }
   }, [playbackState.isPlaying, play, pause]);
 
+  const toggleLoop = useCallback(() => {
+    const newLoopingState = !isLoopingRef.current;
+    isLoopingRef.current = newLoopingState;
+    safeSetState(() => {
+      setPlaybackState((prev) => ({
+        ...prev,
+        isLooping: newLoopingState,
+      }));
+    });
+  }, [safeSetState]);
+
   return {
     waveformRef,
     playbackState,
@@ -324,6 +347,7 @@ export function useAudioPlayer({
       seekTo,
       setVolume,
       togglePlayPause,
+      toggleLoop,
     },
   };
 }

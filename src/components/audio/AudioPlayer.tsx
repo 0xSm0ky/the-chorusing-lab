@@ -8,6 +8,7 @@ import {
   Square,
   Volume2,
   RotateCcw,
+  Repeat,
   Loader2,
   AlertCircle,
 } from "lucide-react";
@@ -65,6 +66,7 @@ export function AudioPlayer({
         <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
         {!autoload && !currentUrl && (
           <button
+            type="button"
             onClick={handleLoadAudio}
             disabled={!url}
             className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -121,6 +123,7 @@ export function AudioPlayer({
           {/* Playback Controls */}
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={controls.togglePlayPause}
               disabled={!isReady || loading}
               className="audio-control-btn"
@@ -134,6 +137,7 @@ export function AudioPlayer({
             </button>
 
             <button
+              type="button"
               onClick={controls.stop}
               disabled={!isReady || loading}
               className="audio-control-btn"
@@ -143,12 +147,26 @@ export function AudioPlayer({
             </button>
 
             <button
+              type="button"
               onClick={() => controls.seekTo(0)}
               disabled={!isReady || loading}
               className="audio-control-btn"
               aria-label="Restart"
             >
               <RotateCcw className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={controls.toggleLoop}
+              disabled={!isReady || loading}
+              className={`audio-control-btn ${
+                playbackState.isLooping ? "text-indigo-600" : ""
+              }`}
+              aria-label={playbackState.isLooping ? "Disable loop" : "Enable loop"}
+              title={playbackState.isLooping ? "Looping enabled" : "Enable looping"}
+            >
+              <Repeat className={`w-4 h-4 ${playbackState.isLooping ? "fill-current" : ""}`} />
             </button>
           </div>
 
