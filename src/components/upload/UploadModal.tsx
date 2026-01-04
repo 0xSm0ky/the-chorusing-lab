@@ -110,12 +110,28 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
 
   const basicSettings = loadBasicSettings();
 
+  // Validate and cast speakerGender to the expected type
+  const getValidSpeakerGender = (value: string): 'male' | 'female' | 'other' | '' => {
+    if (value === 'male' || value === 'female' || value === 'other' || value === '') {
+      return value;
+    }
+    return '';
+  };
+
+  // Validate and cast speakerAgeRange to the expected type
+  const getValidSpeakerAgeRange = (value: string): 'teen' | 'younger-adult' | 'adult' | 'senior' | '' => {
+    if (value === 'teen' || value === 'younger-adult' || value === 'adult' || value === 'senior' || value === '') {
+      return value;
+    }
+    return '';
+  };
+
   const [formData, setFormData] = useState<UploadFormData>({
     title: '',
     duration: '',
     language: basicSettings.language || '',
-    speakerGender: basicSettings.speakerGender || '',
-    speakerAgeRange: basicSettings.speakerAgeRange || '',
+    speakerGender: getValidSpeakerGender(basicSettings.speakerGender || ''),
+    speakerAgeRange: getValidSpeakerAgeRange(basicSettings.speakerAgeRange || ''),
     speakerDialect: basicSettings.speakerDialect || '',
     transcript: '',
     sourceUrl: basicSettings.sourceUrl || '',
@@ -151,10 +167,7 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
     return null;
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = (file: File) => {
     console.log('🔍 FILE DEBUG START');
     console.log('File name:', file.name);
     console.log('File size:', file.size);
@@ -310,6 +323,12 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
     console.log('🔍 FILE DEBUG END');
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+  };
+
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -330,11 +349,7 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const file = files[0];
-      // Create a synthetic event to reuse handleFileSelect
-      const syntheticEvent = {
-        target: { files: [file] },
-      } as React.ChangeEvent<HTMLInputElement>;
-      handleFileSelect(syntheticEvent);
+      processFile(file);
     }
   };
 
@@ -443,8 +458,8 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
       title: '',
       duration: '',
       language: basicSettings.language || '',
-      speakerGender: basicSettings.speakerGender || '',
-      speakerAgeRange: basicSettings.speakerAgeRange || '',
+      speakerGender: getValidSpeakerGender(basicSettings.speakerGender || ''),
+      speakerAgeRange: getValidSpeakerAgeRange(basicSettings.speakerAgeRange || ''),
       speakerDialect: basicSettings.speakerDialect || '',
       transcript: '',
       sourceUrl: basicSettings.sourceUrl || '',

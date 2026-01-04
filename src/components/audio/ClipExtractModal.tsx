@@ -120,11 +120,27 @@ export function ClipExtractModal({
 
   const basicSettings = loadBasicSettings();
 
+  // Validate and cast speakerGender to the expected type
+  const getValidSpeakerGender = (value: string): "male" | "female" | "other" | "" => {
+    if (value === "male" || value === "female" || value === "other" || value === "") {
+      return value;
+    }
+    return "";
+  };
+
+  // Validate and cast speakerAgeRange to the expected type
+  const getValidSpeakerAgeRange = (value: string): "teen" | "younger-adult" | "adult" | "senior" | "" => {
+    if (value === "teen" || value === "younger-adult" || value === "adult" || value === "senior" || value === "") {
+      return value;
+    }
+    return "";
+  };
+
   const [formData, setFormData] = useState<ExtractFormData>({
     title: `Clip from ${originalFilename.replace(/\.[^/.]+$/, "")}`,
     language: basicSettings.language || "",
-    speakerGender: (basicSettings.speakerGender as any) || "",
-    speakerAgeRange: (basicSettings.speakerAgeRange as any) || "",
+    speakerGender: getValidSpeakerGender(basicSettings.speakerGender || ""),
+    speakerAgeRange: getValidSpeakerAgeRange(basicSettings.speakerAgeRange || ""),
     speakerDialect: basicSettings.speakerDialect || "",
     transcript: initialTranscript,
     sourceUrl: basicSettings.sourceUrl || initialSourceUrl,
@@ -388,8 +404,8 @@ export function ClipExtractModal({
     setFormData({
       title: "",
       language: basicSettings.language || "",
-      speakerGender: (basicSettings.speakerGender as any) || "",
-      speakerAgeRange: (basicSettings.speakerAgeRange as any) || "",
+      speakerGender: getValidSpeakerGender(basicSettings.speakerGender || ""),
+      speakerAgeRange: getValidSpeakerAgeRange(basicSettings.speakerAgeRange || ""),
       speakerDialect: basicSettings.speakerDialect || "",
       transcript: initialTranscript || "",
       sourceUrl: basicSettings.sourceUrl || initialSourceUrl || "",

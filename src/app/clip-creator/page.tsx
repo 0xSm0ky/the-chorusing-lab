@@ -34,10 +34,7 @@ export default function ClipCreatorPage() {
     setAuthModalOpen(true);
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  const processFile = (file: File) => {
     // Validate file
     const supportedFormats = ["mp3", "wav", "m4a", "ogg", "webm"];
 
@@ -68,6 +65,12 @@ export default function ClipCreatorPage() {
     audio.src = objectUrl;
   };
 
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+  };
+
   const handleNewFile = () => {
     setSelectedFile(null);
     setSourceUrl("");
@@ -94,11 +97,7 @@ export default function ClipCreatorPage() {
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const file = files[0];
-      // Create a synthetic event to reuse handleFileSelect
-      const syntheticEvent = {
-        target: { files: [file] },
-      } as React.ChangeEvent<HTMLInputElement>;
-      handleFileSelect(syntheticEvent);
+      processFile(file);
     }
   };
 
