@@ -28,6 +28,10 @@ const AuthContext = createContext<ExtendedAuthContextType | undefined>(
   undefined
 );
 
+// Cache for admin status to avoid repeated API calls
+const adminStatusCache = new Map<string, { isAdmin: boolean; timestamp: number }>();
+const ADMIN_STATUS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authState, setAuthState] = useState<AuthState>({
     user: null,
@@ -38,11 +42,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Use a ref to track if component is mounted to prevent state updates after unmount
   const isMounted = useRef(true);
+  // Track last processed session token to avoid redundant work
+  const lastProcessedToken = useRef<string | null>(null);
+  // Debounce timer for auth state changes
+  const authChangeTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
+      if (authChangeTimer.current) {
+        clearTimeout(authChangeTimer.current);
+      }
     };
   }, []);
 
@@ -51,20 +62,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return input.includes("@") && input.includes(".");
   };
 
+  // Check admin status with caching
+  const checkAdminStatus = useCallback(
+    async (userId: string, accessToken: string): Promise<boolean> => {
+      // Check cache first
+      const cached = adminStatusCache.get(userId);
+      if (cached && Date.now() - cached.timestamp < ADMIN_STATUS_CACHE_TTL) {
+        return cached.isAdmin;
+      }
+
+      try {
+        const response = await fetch("/api/auth/admin-status", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const isAdmin = data.isAdmin || false;
+          // Cache the result
+          adminStatusCache.set(userId, {
+            isAdmin,
+            timestamp: Date.now(),
+          });
+          return isAdmin;
+        }
+      } catch (adminError) {
+        console.warn("Failed to check admin status:", adminError);
+      }
+
+      return false;
+    },
+    []
+  );
+
   // Convert Supabase session to our User type
+  // Now with parallelized operations and optional admin status check
   const sessionToUser = useCallback(
-    async (session: Session | null): Promise<User | null> => {
+    async (
+      session: Session | null,
+      options: { skipAdminCheck?: boolean } = {}
+    ): Promise<User | null> => {
       if (!session?.user) {
         return null;
       }
 
       try {
-        // Get user profile from our profiles table
-        const { data: profile, error } = await supabase
+        // Parallelize profile fetch and admin status check
+        const profilePromise = supabase
           .from("profiles")
           .select("username, email")
           .eq("id", session.user.id)
           .maybeSingle();
+
+        const adminPromise = options.skipAdminCheck
+          ? Promise.resolve(false)
+          : session.access_token
+            ? checkAdminStatus(session.user.id, session.access_token)
+            : Promise.resolve(false);
+
+        // Wait for both in parallel
+        const [profileResult, isAdminUser] = await Promise.all([
+          profilePromise,
+          adminPromise,
+        ]);
+
+        const { data: profile, error } = profileResult;
 
         let username = session.user.user_metadata?.username || "Unknown";
         let email =
@@ -97,25 +160,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // Check admin status non-blocking
-        let isAdminUser = false;
-        try {
-          // We already have the session token, no need to fetch session again
-          if (session.access_token) {
-            const response = await fetch("/api/auth/admin-status", {
-              headers: {
-                Authorization: `Bearer ${session.access_token}`,
-              },
-            });
-            if (response.ok) {
-              const data = await response.json();
-              isAdminUser = data.isAdmin || false;
-            }
-          }
-        } catch (adminError) {
-          console.warn("Failed to check admin status:", adminError);
-        }
-
         return {
           id: session.user.id,
           username,
@@ -135,7 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
       }
     },
-    []
+    [checkAdminStatus]
   );
 
   // FIXED: Memoize auth headers to return stable object references
@@ -158,7 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initializeAuth = async () => {
       try {
-        // Get initial session
+        // Get initial session (Supabase uses localStorage, so this is fast)
         const {
           data: { session: initialSession },
           error,
@@ -168,15 +212,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           throw error;
         }
 
-        const user = await sessionToUser(initialSession);
+        // If we have a session, update state optimistically first
+        if (initialSession?.access_token) {
+          // Update state immediately with basic info from session
+          const optimisticUser: User = {
+            id: initialSession.user.id,
+            username:
+              initialSession.user.user_metadata?.username || "Unknown",
+            email: initialSession.user.email || "Unknown",
+            createdAt: initialSession.user.created_at,
+            isAdmin: false, // Will be updated when full check completes
+          };
 
-        if (mounted) {
-          setSession(initialSession);
-          setAuthState({
-            user,
-            isLoading: false,
-            error: null,
-          });
+          if (mounted) {
+            setSession(initialSession);
+            setAuthState({
+              user: optimisticUser,
+              isLoading: false, // Stop loading immediately
+              error: null,
+            });
+            lastProcessedToken.current = initialSession.access_token;
+          }
+
+          // Then verify and update with full profile/admin status in background
+          const fullUser = await sessionToUser(initialSession);
+          if (mounted && fullUser) {
+            setAuthState((prev) => ({
+              ...prev,
+              user: fullUser,
+            }));
+          }
+        } else {
+          // No session, we're done
+          if (mounted) {
+            setSession(null);
+            setAuthState({
+              user: null,
+              isLoading: false,
+              error: null,
+            });
+          }
         }
       } catch (err: any) {
         console.error("Auth initialization error:", err);
@@ -192,32 +267,93 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initializeAuth();
 
-    // Listen for auth changes
+    // Listen for auth changes with debouncing and session comparison
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
-      // If the session is effectively the same, don't trigger a full re-conversion
-      // This helps avoid loops, though strict equality check on objects might fail unrelatedly
-      // handled by internal React state diffing mostly.
-
-      console.log("Auth state change:", event);
-
-      // We generally trust the event session, but verify it
-      const user = await sessionToUser(currentSession);
-
-      if (mounted) {
-        setSession(currentSession);
-        setAuthState({
-          user,
-          isLoading: false,
-          error: null,
-        });
+      // Clear any pending debounce timer
+      if (authChangeTimer.current) {
+        clearTimeout(authChangeTimer.current);
       }
+
+      // Check if session actually changed by comparing access tokens
+      const currentToken = currentSession?.access_token || null;
+      if (
+        currentToken === lastProcessedToken.current &&
+        event !== "SIGNED_OUT"
+      ) {
+        // Session hasn't meaningfully changed, skip processing
+        return;
+      }
+
+      // Debounce rapid auth state changes (e.g., token refresh)
+      authChangeTimer.current = setTimeout(async () => {
+        if (!mounted) return;
+
+        console.log("Auth state change:", event);
+
+        // For token refresh events, skip admin check to speed things up
+        const skipAdminCheck = event === "TOKEN_REFRESHED";
+
+        // Update session immediately
+        if (mounted) {
+          setSession(currentSession);
+          lastProcessedToken.current = currentToken;
+        }
+
+        // If we have a session, update user info
+        if (currentSession?.access_token) {
+          // For SIGNED_IN events, show optimistic update first
+          if (event === "SIGNED_IN" && mounted) {
+            const optimisticUser: User = {
+              id: currentSession.user.id,
+              username:
+                currentSession.user.user_metadata?.username || "Unknown",
+              email: currentSession.user.email || "Unknown",
+              createdAt: currentSession.user.created_at,
+              isAdmin: false,
+            };
+            setAuthState({
+              user: optimisticUser,
+              isLoading: false,
+              error: null,
+            });
+          }
+
+          // Then get full user info (with optional admin check)
+          const user = await sessionToUser(currentSession, {
+            skipAdminCheck,
+          });
+
+          if (mounted) {
+            setAuthState({
+              user,
+              isLoading: false,
+              error: null,
+            });
+          }
+        } else {
+          // No session (signed out)
+          if (mounted) {
+            setAuthState({
+              user: null,
+              isLoading: false,
+              error: null,
+            });
+            lastProcessedToken.current = null;
+            // Clear admin cache on logout
+            adminStatusCache.clear();
+          }
+        }
+      }, event === "TOKEN_REFRESHED" ? 100 : 0); // Small delay for token refresh, immediate for other events
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      if (authChangeTimer.current) {
+        clearTimeout(authChangeTimer.current);
+      }
     };
   }, [sessionToUser]);
 
@@ -233,22 +369,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) throw error;
       if (!data.session) throw new Error("No session returned from login");
 
-      // We do NOT wait for onAuthStateChange here to stop loading.
-      // We manually ensure state is updated to be responsive.
-      // onAuthStateChange will eventually fire and reconcile, but we want immediate feedback.
+      // Optimistic update: immediately update state with session data
+      // This provides instant feedback while onAuthStateChange reconciles in background
+      const optimisticUser: User = {
+        id: data.session.user.id,
+        username: data.session.user.user_metadata?.username || "Unknown",
+        email: data.session.user.email || credentials.email,
+        createdAt: data.session.user.created_at,
+        isAdmin: false, // Will be updated when full check completes
+      };
 
-      // const user = await sessionToUser(data.session);
-      // setSession(data.session);
-      // setAuthState({
-      //   user,
-      //   isLoading: false,
-      //   error: null
-      // });
+      setSession(data.session);
+      setAuthState({
+        user: optimisticUser,
+        isLoading: false, // Stop loading immediately
+        error: null,
+      });
+      lastProcessedToken.current = data.session.access_token;
 
-      // Actually, relying on onAuthStateChange IS safer for consistency,
-      // BUThit often lags.
-      // Optimistic update:
-      console.log("Login successful, awaiting state update...");
+      // Fetch full user info in background (profile + admin status)
+      // onAuthStateChange will also fire and reconcile, but we have immediate feedback
+      sessionToUser(data.session)
+        .then((fullUser) => {
+          if (fullUser && isMounted.current) {
+            setAuthState((prev) => ({
+              ...prev,
+              user: fullUser,
+            }));
+          }
+        })
+        .catch((err) => {
+          console.warn("Background user fetch failed:", err);
+          // Don't update state on error - optimistic update is fine
+        });
     } catch (error: any) {
       console.error("Login failed:", error);
       let errorMessage = error.message || "Login failed";
@@ -306,7 +459,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // If we have a session, success. onAuthStateChange will handle the rest.
+      // If we have a session, update state optimistically
+      if (data.session) {
+        const optimisticUser: User = {
+          id: data.session.user.id,
+          username: credentials.username, // We know this from registration
+          email: credentials.email,
+          createdAt: data.session.user.created_at,
+          isAdmin: false, // Will be updated when full check completes
+        };
+
+        setSession(data.session);
+        setAuthState({
+          user: optimisticUser,
+          isLoading: false, // Stop loading immediately
+          error: null,
+        });
+        lastProcessedToken.current = data.session.access_token;
+
+        // Fetch full user info in background (profile + admin status)
+        // onAuthStateChange will also fire and reconcile, but we have immediate feedback
+        sessionToUser(data.session)
+          .then((fullUser) => {
+            if (fullUser && isMounted.current) {
+              setAuthState((prev) => ({
+                ...prev,
+                user: fullUser,
+              }));
+            }
+          })
+          .catch((err) => {
+            console.warn("Background user fetch failed:", err);
+            // Don't update state on error - optimistic update is fine
+          });
+      }
     } catch (error: any) {
       console.error("Registration failed:", error);
       setAuthState({
