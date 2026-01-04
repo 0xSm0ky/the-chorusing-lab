@@ -210,7 +210,8 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
 
   // Fetch available dialects when language changes
   useEffect(() => {
-    if (!filters.language) {
+    const language = filters.language;
+    if (!language) {
       setAvailableDialects([]);
       return;
     }
@@ -218,7 +219,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
     const fetchDialects = async () => {
       setLoadingDialects(true);
       try {
-        const response = await fetch(`/api/dialects?language=${encodeURIComponent(filters.language)}`);
+        const response = await fetch(`/api/dialects?language=${encodeURIComponent(language)}`);
         if (response.ok) {
           const data = await response.json();
           setAvailableDialects(data.dialects || []);
@@ -832,7 +833,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
                     <div className="relative group">
                       <Info className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help" />
                       <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block z-10 w-64 p-2 bg-gray-900 text-white text-xs rounded-md shadow-lg">
-                        Don't see your target dialect? That's because no one has added clips for it yet! You can be the first.
+                        Don&apos;t see your target dialect? That&apos;s because no one has added clips for it yet! You can be the first.
                         <div className="absolute left-2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
                       </div>
                     </div>
