@@ -46,6 +46,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   const [clips, setClips] = useState<ClipWithStarInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFiltering, setIsFiltering] = useState(false);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedClip, setExpandedClip] = useState<string | null>(null);
   const [playingClip, setPlayingClip] = useState<string | null>(null);
@@ -275,54 +276,28 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
     [router, pathname]
   );
 
-  // Load user preferences on mount (only if no URL params for preference fields)
+  // Load user preferences BEFORE initial fetch to avoid flashing
   useEffect(() => {
     if (preferencesLoadedRef.current) return;
-    if (!user) {
-      preferencesLoadedRef.current = true; // Mark as loaded even if no user
-      return;
-    }
-
-    // Check if URL has any preference filter params
-    const hasUrlPreferenceParams =
-      searchParams?.get("language") ||
-      searchParams?.get("speakerGender") ||
-      searchParams?.get("speakerAgeRange") ||
-      searchParams?.get("speakerDialect");
-
-    // If URL has preference params, still load saved preferences to sync lastSavedPreferencesRef
-    // but don't apply them to filters (URL takes precedence)
-    if (hasUrlPreferenceParams) {
-      // Still load preferences to sync lastSavedPreferencesRef, but don't apply them
-      const loadPreferencesForSync = async () => {
-        try {
-          const headers = getAuthHeaders();
-          const response = await fetch("/api/user/preferences", {
-            headers,
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            const preferences: FilterPreferences | null = data.preferences;
-            // Sync lastSavedPreferencesRef so saves work correctly
-            lastSavedPreferencesRef.current = preferences;
-          } else {
-            lastSavedPreferencesRef.current = null;
-          }
-        } catch (error) {
-          console.error("Failed to load preferences for sync:", error);
-          lastSavedPreferencesRef.current = null;
-        } finally {
-          preferencesLoadedRef.current = true;
-        }
-      };
-
-      loadPreferencesForSync();
-      return;
-    }
-
-    // Load preferences from API
+    
     const loadPreferences = async () => {
+      setPreferencesLoading(true);
+      
+      if (!user) {
+        // No user, so no preferences to load
+        preferencesLoadedRef.current = true;
+        lastSavedPreferencesRef.current = null;
+        setPreferencesLoading(false);
+        return;
+      }
+
+      // Check if URL has any preference filter params
+      const hasUrlPreferenceParams =
+        searchParams?.get("language") ||
+        searchParams?.get("speakerGender") ||
+        searchParams?.get("speakerAgeRange") ||
+        searchParams?.get("speakerDialect");
+
       try {
         const headers = getAuthHeaders();
         const response = await fetch("/api/user/preferences", {
@@ -333,8 +308,13 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
           const data = await response.json();
           const preferences: FilterPreferences | null = data.preferences;
 
-          if (preferences) {
+          if (hasUrlPreferenceParams) {
+            // URL params take precedence - just sync for save functionality
+            lastSavedPreferencesRef.current = preferences;
+          } else if (preferences) {
+            // No URL params - apply preferences to filters BEFORE initial fetch
             console.log("✅ Loaded preferences:", preferences);
+            
             // Build new filters with preferences applied
             const newFilters: AudioFilters = {
               ...filtersRef.current,
@@ -352,19 +332,18 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
               newFilters.speakerDialect = preferences.speakerDialect;
             }
 
-            // Apply preferences to filters state
+            // Apply preferences to filters state BEFORE initial fetch
             setFilters(newFilters);
+            filtersRef.current = newFilters;
 
-            // Update URL to reflect applied preferences (use setTimeout to avoid render warning)
-            setTimeout(() => {
-              updateURL(
-                newFilters,
-                sortRef.current,
-                searchTerm,
-                showStarredRef.current,
-                showMyUploadsRef.current
-              );
-            }, 0);
+            // Update URL to reflect applied preferences
+            updateURL(
+              newFilters,
+              sortRef.current,
+              searchTerm,
+              showStarredRef.current,
+              showMyUploadsRef.current
+            );
 
             // Track last saved preferences
             lastSavedPreferencesRef.current = preferences;
@@ -372,6 +351,8 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
             // No preferences saved yet
             lastSavedPreferencesRef.current = null;
           }
+        } else {
+          lastSavedPreferencesRef.current = null;
         }
       } catch (error) {
         // Silently handle errors - don't break UI
@@ -379,6 +360,10 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
         lastSavedPreferencesRef.current = null;
       } finally {
         preferencesLoadedRef.current = true;
+        // Use setTimeout to ensure filters state update has been processed before initial fetch
+        setTimeout(() => {
+          setPreferencesLoading(false);
+        }, 0);
       }
     };
 
@@ -441,15 +426,17 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
     }
   }, [filters, sort, showStarred, showMyUploads, getAuthHeaders]);
 
-  // Initial load only - use full-page spinner only if we have no clips
+  // Initial load - wait for preferences to load first, then fetch with correct filters
   useEffect(() => {
-    if (!hasInitialLoadRef.current) {
-      fetchClips(false);
-      hasInitialLoadRef.current = true;
-      setHasInitialLoad(true);
-    }
+    // Don't fetch until preferences are loaded (or if no user, preferencesLoading will be false)
+    if (hasInitialLoadRef.current || preferencesLoading) return;
+    
+    // Preferences are loaded, now do initial fetch with correct filters
+    fetchClips(false);
+    hasInitialLoadRef.current = true;
+    setHasInitialLoad(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run on mount - fetchClips is stable on first render
+  }, [preferencesLoading]); // Wait for preferences to load before initial fetch
 
   // Handle refresh from parent
   useEffect(() => {
