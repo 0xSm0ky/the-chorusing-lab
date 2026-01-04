@@ -42,6 +42,7 @@ export default function ClipCreatorPage() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const openAuthModal = (mode: "login" | "register") => {
     setAuthMode(mode);
@@ -52,8 +53,7 @@ export default function ClipCreatorPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate file
-    const maxSize = 100 * 1024 * 1024; // 100MB for source files
+    // Validate file format
     const supportedFormats = ["mp3", "wav", "m4a", "ogg", "webm"];
 
     const extension = file.name.split(".").pop()?.toLowerCase();
@@ -62,11 +62,6 @@ export default function ClipCreatorPage() {
       setFileError(
         `Unsupported format. Supported: ${supportedFormats.join(", ")}`
       );
-      return;
-    }
-
-    if (file.size > maxSize) {
-      setFileError("File too large. Maximum size is 100MB.");
       return;
     }
 
@@ -93,6 +88,34 @@ export default function ClipCreatorPage() {
     setSourceUrl("");
     setFileError(null);
     setYoutubeUrl("");
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      // Create a synthetic event to reuse handleFileSelect
+      const syntheticEvent = {
+        target: { files: [file] },
+      } as React.ChangeEvent<HTMLInputElement>;
+      handleFileSelect(syntheticEvent);
+    }
   };
 
   const handleYouTubeDownload = async () => {
@@ -379,7 +402,16 @@ export default function ClipCreatorPage() {
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Select Audio File
                     </label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors">
+                    <div 
+                      className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                        isDragging 
+                          ? 'border-indigo-500 bg-indigo-50' 
+                          : 'border-gray-300 hover:border-gray-400'
+                      }`}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                    >
                       <input
                         type="file"
                         accept=".mp3,.wav,.m4a,.ogg,.webm"
@@ -397,7 +429,7 @@ export default function ClipCreatorPage() {
                           Choose audio file
                         </label>
                         <p className="text-sm text-gray-500 mt-2">
-                          MP3, WAV, M4A, OGG, WebM (max 100MB)
+                          MP3, WAV, M4A, OGG, WebM
                         </p>
                       </div>
                     </div>
