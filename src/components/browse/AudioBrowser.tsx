@@ -45,6 +45,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
 
   const [clips, setClips] = useState<ClipWithStarInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFiltering, setIsFiltering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedClip, setExpandedClip] = useState<string | null>(null);
   const [playingClip, setPlayingClip] = useState<string | null>(null);
@@ -100,10 +101,14 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   const sortRef = useRef(sort);
   const showStarredRef = useRef(showStarred);
   const showMyUploadsRef = useRef(showMyUploads);
+  const fetchClipsRef = useRef<typeof fetchClips>();
 
   // Refs for preference management
   const preferencesLoadedRef = useRef(false);
   const lastSavedPreferencesRef = useRef<FilterPreferences | null>(null);
+  
+  // Track if initial load has completed
+  const hasInitialLoadRef = useRef(false);
 
   // State for available dialects
   const [availableDialects, setAvailableDialects] = useState<string[]>([]);
@@ -374,8 +379,13 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
     loadPreferences();
   }, [user, searchParams, getAuthHeaders, updateURL, searchTerm]);
 
-  const fetchClips = useCallback(async () => {
-    setLoading(true);
+  const fetchClips = useCallback(async (isFilterChange: boolean = false) => {
+    // Only set loading: true on initial load, not when filters change
+    if (isFilterChange) {
+      setIsFiltering(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
 
     try {
@@ -417,24 +427,56 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to load clips");
     } finally {
-      setLoading(false);
+      if (isFilterChange) {
+        setIsFiltering(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, [filters, sort, showStarred, showMyUploads, getAuthHeaders]);
 
+  // Initial load only
   useEffect(() => {
-    fetchClips();
-  }, [fetchClips]);
+    if (!hasInitialLoadRef.current) {
+      fetchClips(false);
+      hasInitialLoadRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount - fetchClips is stable on first render
 
+  // Handle refresh from parent
   useEffect(() => {
     if (onRefresh) {
-      fetchClips();
+      fetchClips(false);
     }
-  }, [onRefresh, fetchClips]);
+  }, [onRefresh]);
+
+  // Keep fetchClips ref in sync
+  useEffect(() => {
+    fetchClipsRef.current = fetchClips;
+  }, [fetchClips]);
+
+  // Watch for filter/sort changes and fetch in background
+  useEffect(() => {
+    // Skip if initial load hasn't happened yet
+    if (!hasInitialLoadRef.current) return;
+    
+    // Fetch with isFilterChange=true to show subtle loading indicator
+    // Use a timeout to batch rapid filter changes
+    const timeoutId = setTimeout(() => {
+      if (fetchClipsRef.current) {
+        fetchClipsRef.current(true);
+      }
+    }, 0);
+    
+    return () => clearTimeout(timeoutId);
+  }, [filters, sort, showStarred, showMyUploads]);
 
   const handleFilterChange = (key: keyof AudioFilters, value: any) => {
     setFilters((prev) => {
       const newFilters = { ...prev, [key]: value };
       updateURL(newFilters, sort, searchTerm, showStarred, showMyUploads);
+      // fetchClips will be called by useEffect when filters change
       return newFilters;
     });
   };
@@ -448,6 +490,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
         speakerDialect: language ? prev.speakerDialect : undefined
       };
       updateURL(newFilters, sort, searchTerm, showStarred, showMyUploads);
+      // fetchClips will be called by useEffect when filters change
       return newFilters;
     });
   };
@@ -462,6 +505,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
             : ("asc" as const),
       };
       updateURL(filters, newSort, searchTerm, showStarred, showMyUploads);
+      // fetchClips will be called by useEffect when sort changes
       return newSort;
     });
   };
@@ -490,11 +534,13 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   const handleShowStarredChange = (value: boolean) => {
     setShowStarred(value);
     updateURL(filters, sort, searchTerm, value, showMyUploads);
+    // fetchClips will be called by useEffect when showStarred changes
   };
 
   const handleShowMyUploadsChange = (value: boolean) => {
     setShowMyUploads(value);
     updateURL(filters, sort, searchTerm, showStarred, value);
+    // fetchClips will be called by useEffect when showMyUploads changes
   };
 
   const toggleExpanded = (clipId: string) => {
@@ -631,7 +677,8 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
     return new Date(dateString).toLocaleDateString();
   };
 
-  if (loading) {
+  // Only show full-page spinner on initial load when there are no clips
+  if (loading && clips.length === 0) {
     return (
       <div className="flex items-center justify-center p-8">
         <div className="w-8 h-8 border-2 border-gray-300 border-t-indigo-600 rounded-full animate-spin" />
@@ -645,8 +692,14 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-900">Audio Library</h2>
-        <div className="text-sm text-gray-600">
-          {filteredClips.length} clips found
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <div 
+            className={`w-4 h-4 border-2 border-gray-300 border-t-indigo-600 rounded-full transition-opacity duration-200 ${
+              isFiltering ? 'opacity-100 animate-spin' : 'opacity-0'
+            }`}
+            aria-hidden="true"
+          />
+          <span>{filteredClips.length} clips found</span>
         </div>
       </div>
 
