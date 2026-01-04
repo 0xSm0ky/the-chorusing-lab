@@ -591,6 +591,11 @@ export function AudioEditor({ file, sourceUrl }: AudioEditorProps) {
       // Close the AudioContext to free resources
       await audioContext.close();
 
+      // Pause the main audio playback when opening the extract modal (don't stop, so user can resume)
+      if (wavesurferRef.current) {
+        wavesurferRef.current.pause();
+      }
+
       setExtractedAudioBlob(blob);
       setExtractedTranscript("");
       setExtractModalOpen(true);
@@ -608,6 +613,9 @@ export function AudioEditor({ file, sourceUrl }: AudioEditorProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isReady) return;
+
+      // Don't trigger shortcuts if extract modal is open
+      if (extractModalOpen) return;
 
       // Don't trigger shortcuts if user is typing
       if (
@@ -671,6 +679,7 @@ export function AudioEditor({ file, sourceUrl }: AudioEditorProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     isReady,
+    extractModalOpen,
     selectedRegion,
     togglePlayPause,
     setRegionStart,
