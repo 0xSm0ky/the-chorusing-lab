@@ -145,73 +145,72 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Batch fetch all discovery stats for all clips at once (fixes N+1 query problem)
+    const clipIds = clips.map((clip) => clip.id);
+    
+    // Fetch all stars, difficulty ratings, and votes in parallel using batch methods
+    const [starsMap, difficultyRatingsMap, votesMap] = await Promise.all([
+      clipIds.length > 0
+        ? serverDb.getClipStarsBatch(clipIds, accessToken || undefined).catch((error) => {
+            console.warn("Failed to get stars batch:", error);
+            return new Map<string, string[]>();
+          })
+        : Promise.resolve(new Map<string, string[]>()),
+      clipIds.length > 0
+        ? serverDb.getClipDifficultyRatingsBatch(clipIds, accessToken || undefined).catch((error) => {
+            console.warn("Failed to get difficulty ratings batch:", error);
+            return new Map<string, { average: number | null; count: number; userRating: number | null }>();
+          })
+        : Promise.resolve(new Map<string, { average: number | null; count: number; userRating: number | null }>()),
+      clipIds.length > 0
+        ? serverDb.getClipVotesBatch(clipIds, accessToken || undefined).catch((error) => {
+            console.warn("Failed to get votes batch:", error);
+            return new Map<string, { upvoteCount: number; downvoteCount: number; voteScore: number; userVote: "up" | "down" | null }>();
+          })
+        : Promise.resolve(new Map<string, { upvoteCount: number; downvoteCount: number; voteScore: number; userVote: "up" | "down" | null }>()),
+    ]);
+
     // Add discovery stats, file URLs, and star info to clips
-    const clipsWithDiscovery = await Promise.all(
-      clips.map(async (clip) => {
-        // Get star info (existing functionality - wrap in try-catch for resilience)
-        let starredBy: string[] = [];
-        try {
-          starredBy = await serverDb.getClipStars(
-            clip.id,
-            accessToken || undefined
-          );
-        } catch (error) {
-          console.warn(`Failed to get stars for clip ${clip.id}:`, error);
-        }
+    const clipsWithDiscovery = clips.map((clip) => {
+      // Get star info from batch map
+      const starredBy = starsMap.get(clip.id) || [];
+      
+      // Get difficulty rating from batch map
+      const difficultyRating = difficultyRatingsMap.get(clip.id) || { average: null, count: 0, userRating: null };
+      
+      // Get votes from batch map
+      const votes = votesMap.get(clip.id) || { upvoteCount: 0, downvoteCount: 0, voteScore: 0, userVote: null as "up" | "down" | null };
 
-        // Get difficulty rating (new - gracefully handle if table doesn't exist)
-        let difficultyRating: { average: number | null; count: number; userRating: number | null } = { average: null, count: 0, userRating: null };
-        try {
-          difficultyRating = await serverDb.getClipDifficultyRating(
-            clip.id,
-            accessToken || undefined
-          );
-        } catch (error) {
-          console.warn(`Failed to get difficulty rating for clip ${clip.id}:`, error);
-        }
+      // Calculate characters per second (no DB call, safe)
+      const charactersPerSecond = serverDb.calculateCharactersPerSecond(clip);
 
-        // Get votes (new - gracefully handle if table doesn't exist)
-        let votes = { upvoteCount: 0, downvoteCount: 0, voteScore: 0, userVote: null as "up" | "down" | null };
-        try {
-          votes = await serverDb.getClipVotes(
-            clip.id,
-            accessToken || undefined
-          );
-        } catch (error) {
-          console.warn(`Failed to get votes for clip ${clip.id}:`, error);
-        }
+      // Get the storage path for the clip - we need to handle both old and new format
+      let publicUrl: string;
+      const clipWithPath = clip as any;
 
-        // Calculate characters per second (no DB call, safe)
-        const charactersPerSecond = serverDb.calculateCharactersPerSecond(clip);
+      if (clipWithPath.storagePath) {
+        // New format: use storage path
+        publicUrl = getPublicUrl(clipWithPath.storagePath);
+      } else {
+        // Fallback: construct path and use file serving API
+        publicUrl = `/api/files/${clip.filename}`;
+      }
 
-        // Get the storage path for the clip - we need to handle both old and new format
-        let publicUrl: string;
-        const clipWithPath = clip as any;
-
-        if (clipWithPath.storagePath) {
-          // New format: use storage path
-          publicUrl = getPublicUrl(clipWithPath.storagePath);
-        } else {
-          // Fallback: construct path and use file serving API
-          publicUrl = `/api/files/${clip.filename}`;
-        }
-
-        return {
-          ...clip,
-          url: publicUrl,
-          starCount: starredBy.length,
-          isStarredByUser: userId ? starredBy.includes(userId) : false,
-          difficultyRating: difficultyRating.average,
-          difficultyRatingCount: difficultyRating.count,
-          userDifficultyRating: difficultyRating.userRating,
-          upvoteCount: votes.upvoteCount,
-          downvoteCount: votes.downvoteCount,
-          voteScore: votes.voteScore,
-          userVote: votes.userVote,
-          charactersPerSecond: charactersPerSecond || undefined,
-        };
-      })
-    );
+      return {
+        ...clip,
+        url: publicUrl,
+        starCount: starredBy.length,
+        isStarredByUser: userId ? starredBy.includes(userId) : false,
+        difficultyRating: difficultyRating.average,
+        difficultyRatingCount: difficultyRating.count,
+        userDifficultyRating: difficultyRating.userRating,
+        upvoteCount: votes.upvoteCount,
+        downvoteCount: votes.downvoteCount,
+        voteScore: votes.voteScore,
+        userVote: votes.userVote,
+        charactersPerSecond: charactersPerSecond || undefined,
+      };
+    });
 
     // Calculate speed percentiles for filtering
     let speedPercentiles: { slow: number; medium: number; fast: number } | null = null;
