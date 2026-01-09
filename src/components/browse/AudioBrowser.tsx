@@ -126,6 +126,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   // Track if initial load has completed (use state so we can use it in render)
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
   const hasInitialLoadRef = useRef(false);
+  const [preferencesApplied, setPreferencesApplied] = useState(false); // Track when preferences have been applied to state
 
   // State for available dialects
   const [availableDialects, setAvailableDialects] = useState<string[]>([]);
@@ -307,10 +308,12 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
     
     const loadPreferences = async () => {
       setPreferencesLoading(true);
+      setPreferencesApplied(false);
       
       if (!user) {
         // No user, so no preferences to load
         preferencesLoadedRef.current = true;
+        setPreferencesApplied(true);
         lastSavedPreferencesRef.current = null;
         setPreferencesLoading(false);
         return;
@@ -338,6 +341,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
           if (hasUrlPreferenceParams) {
             // URL params take precedence - just sync for save functionality
             lastSavedPreferencesRef.current = preferences;
+            setPreferencesApplied(true);
           } else if (preferences) {
             // No URL params - apply preferences to filters BEFORE initial fetch
             console.log("✅ Loaded preferences:", preferences);
@@ -370,9 +374,12 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
               sortRef.current = newSort;
             }
 
-            // Apply preferences to filters state BEFORE initial fetch
-            setFilters(newFilters);
-            filtersRef.current = newFilters;
+            // Apply preferences to filters state synchronously
+            // Use functional update to ensure we're working with latest state
+            setFilters((prevFilters) => {
+              filtersRef.current = newFilters;
+              return newFilters;
+            });
 
             // Update URL to reflect applied preferences
             updateURL(
@@ -385,30 +392,31 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
 
             // Track last saved preferences
             lastSavedPreferencesRef.current = preferences;
+            setPreferencesApplied(true);
           } else {
             // No preferences saved yet
             lastSavedPreferencesRef.current = null;
+            setPreferencesApplied(true);
           }
         } else {
           lastSavedPreferencesRef.current = null;
+          setPreferencesApplied(true);
         }
       } catch (error) {
         // Silently handle errors - don't break UI
         console.error("Failed to load preferences:", error);
         lastSavedPreferencesRef.current = null;
+        setPreferencesApplied(true);
       } finally {
         preferencesLoadedRef.current = true;
-        // Use setTimeout to ensure filters state update has been processed before initial fetch
-        setTimeout(() => {
-          setPreferencesLoading(false);
-        }, 0);
+        setPreferencesLoading(false);
       }
     };
 
     loadPreferences();
   }, [user, searchParams, getAuthHeaders, updateURL, searchTerm]);
 
-  const fetchClips = useCallback(async (isFilterChange: boolean = false) => {
+  const fetchClips = useCallback(async (isFilterChange: boolean = false, retryCount = 0) => {
     // Only set loading: true on initial load, not when filters change
     if (isFilterChange) {
       setIsFiltering(true);
@@ -446,18 +454,73 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
         ...getAuthHeaders(),
       };
 
-      const response = await fetch(`/api/clips?${params.toString()}`, {
-        headers,
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      let response: Response;
+      try {
+        response = await fetch(`/api/clips?${params.toString()}`, {
+          headers,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        
+        // Check if it's a network/connection error
+        if (fetchError.name === 'AbortError' || fetchError.message?.includes('fetch failed') || fetchError.message?.includes('network')) {
+          // Retry on network errors (up to 2 retries)
+          if (retryCount < 2) {
+            const backoffMs = Math.min(500 * Math.pow(2, retryCount), 2000);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+            return fetchClips(isFilterChange, retryCount + 1);
+          }
+          throw new Error("Connection failed. Please check your internet connection and try again.");
+        }
+        throw fetchError;
+      }
 
       if (!response.ok) {
-        throw new Error("Failed to fetch clips");
+        // Try to get error message from response
+        let errorMessage = "Failed to fetch clips";
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // If response isn't JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        
+        // Retry on 5xx errors (server errors)
+        if (response.status >= 500 && response.status < 600 && retryCount < 2) {
+          const backoffMs = Math.min(500 * Math.pow(2, retryCount), 2000);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          return fetchClips(isFilterChange, retryCount + 1);
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      setClips(data.clips);
+      
+      // Gracefully handle partial data
+      if (data.clips && Array.isArray(data.clips)) {
+        setClips(data.clips);
+      } else {
+        // If response format is unexpected, show empty array instead of error
+        console.warn("Unexpected response format from /api/clips:", data);
+        setClips([]);
+      }
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to load clips");
+      const errorMessage = error instanceof Error ? error.message : "Failed to load clips";
+      
+      // Don't show error if we have existing clips (graceful degradation)
+      if (clips.length > 0 && isFilterChange) {
+        console.warn("Failed to update clips:", errorMessage);
+        // Keep existing clips visible
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       if (isFilterChange) {
         setIsFiltering(false);
@@ -465,19 +528,24 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
         setLoading(false);
       }
     }
-  }, [filters, sort, showStarred, showMyUploads, getAuthHeaders]);
+  }, [filters, sort, showStarred, showMyUploads, getAuthHeaders, clips.length]);
 
-  // Initial load - wait for preferences to load first, then fetch with correct filters
+  // Initial load - wait for preferences to load AND be applied first, then fetch with correct filters
   useEffect(() => {
-    // Don't fetch until preferences are loaded (or if no user, preferencesLoading will be false)
-    if (hasInitialLoadRef.current || preferencesLoading) return;
+    // Don't fetch until preferences are loaded AND applied (or if no user, both will be true quickly)
+    if (hasInitialLoadRef.current || preferencesLoading || !preferencesApplied) return;
     
-    // Preferences are loaded, now do initial fetch with correct filters
-    fetchClips(false);
-    hasInitialLoadRef.current = true;
-    setHasInitialLoad(true);
+    // Preferences are loaded and applied, now do initial fetch with correct filters
+    // Use a small delay to ensure state has propagated (but much shorter than before)
+    const timeoutId = setTimeout(() => {
+      fetchClips(false);
+      hasInitialLoadRef.current = true;
+      setHasInitialLoad(true);
+    }, 50); // Minimal delay just to ensure React state has updated
+    
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preferencesLoading]); // Wait for preferences to load before initial fetch
+  }, [preferencesLoading, preferencesApplied]); // Wait for preferences to load and be applied before initial fetch
 
   // Handle refresh from parent
   useEffect(() => {
@@ -960,7 +1028,18 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-md p-4 text-red-700">
-          {error}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">Error loading clips</p>
+              <p className="text-sm mt-1">{error}</p>
+            </div>
+            <button
+              onClick={() => fetchClips(false)}
+              className="ml-4 px-3 py-1 text-sm font-medium text-red-700 bg-red-100 border border-red-300 rounded-md hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
 

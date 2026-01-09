@@ -17,11 +17,15 @@ if (!supabaseAnonKey) {
   throw new Error("Missing env var: NEXT_PUBLIC_SUPABASE_ANON_KEY");
 }
 
+// TypeScript-safe constants (we know they're strings after the checks above)
+const SUPABASE_URL: string = supabaseUrl;
+const SUPABASE_ANON_KEY: string = supabaseAnonKey;
+
 // Track client instance
 const clientId = supabaseMonitor.registerClient('anonymous');
 
 // Create a single supabase client for interacting with your database
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -82,38 +86,164 @@ export const verifyAccessToken = async (accessToken: string) => {
   return { user, error: null };
 };
 
-// Helper function to create authenticated client
+// Client pool for authenticated clients to prevent connection exhaustion
+interface PooledClient {
+  client: ReturnType<typeof createClient<Database>>;
+  createdAt: number;
+  lastUsed: number;
+  tokenHash: string; // Hash of token for comparison
+}
+
+class ClientPool {
+  private pool: Map<string, PooledClient> = new Map();
+  private readonly MAX_POOL_SIZE = 50; // Maximum number of clients in pool
+  private readonly CLIENT_TTL = 30 * 60 * 1000; // 30 minutes
+  private readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // Clean up every 5 minutes
+  private cleanupTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    // Start cleanup timer
+    this.startCleanup();
+  }
+
+  private startCleanup() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+    }
+    this.cleanupTimer = setInterval(() => {
+      this.cleanup();
+    }, this.CLEANUP_INTERVAL);
+  }
+
+  private cleanup() {
+    const now = Date.now();
+    const expired: string[] = [];
+
+    for (const [key, pooled] of this.pool.entries()) {
+      // Remove clients that haven't been used recently or are too old
+      if (now - pooled.lastUsed > this.CLIENT_TTL || now - pooled.createdAt > this.CLIENT_TTL * 2) {
+        expired.push(key);
+      }
+    }
+
+    for (const key of expired) {
+      this.pool.delete(key);
+    }
+
+    // If pool is still too large, remove least recently used
+    if (this.pool.size > this.MAX_POOL_SIZE) {
+      const entries = Array.from(this.pool.entries());
+      entries.sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+      const toRemove = entries.slice(0, this.pool.size - this.MAX_POOL_SIZE);
+      for (const [key] of toRemove) {
+        this.pool.delete(key);
+      }
+    }
+  }
+
+  private hashToken(token: string): string {
+    // Simple hash for token comparison (not for security)
+    // In production, you might want to use a proper hash function
+    let hash = 0;
+    for (let i = 0; i < Math.min(token.length, 100); i++) {
+      const char = token.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString(36);
+  }
+
+  private isTokenExpired(token: string): boolean {
+    try {
+      const payload = decodeJWT(token);
+      if (!payload || !payload.exp) return true;
+      const now = Math.floor(Date.now() / 1000);
+      // Consider token expired if it expires within 5 minutes
+      return payload.exp < (now + 300);
+    } catch {
+      return true;
+    }
+  }
+
+  getClient(accessToken: string): ReturnType<typeof createClient<Database>> {
+    // Check if token is expired
+    if (this.isTokenExpired(accessToken)) {
+      // Token is expired, create a new client but don't pool it
+      return this.createNewClient(accessToken);
+    }
+
+    const tokenHash = this.hashToken(accessToken);
+    const pooled = this.pool.get(tokenHash);
+
+    if (pooled) {
+      // Update last used time
+      pooled.lastUsed = Date.now();
+      return pooled.client;
+    }
+
+    // Create new client and add to pool
+    const client = this.createNewClient(accessToken);
+    
+    // Only pool if we're under the limit
+    if (this.pool.size < this.MAX_POOL_SIZE) {
+      this.pool.set(tokenHash, {
+        client,
+        createdAt: Date.now(),
+        lastUsed: Date.now(),
+        tokenHash,
+      });
+    }
+
+    return client;
+  }
+
+  private createNewClient(accessToken: string): ReturnType<typeof createClient<Database>> {
+    // Track client instance
+    const authClientId = supabaseMonitor.registerClient('authenticated');
+    
+    // Create client with auth token in headers
+    const client = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        // Custom storage that returns the token for RLS
+        storage: {
+          getItem: (key: string) => {
+            if (key === "sb-access-token") return accessToken;
+            if (key === "sb-refresh-token") return "";
+            return null;
+          },
+          setItem: () => {},
+          removeItem: () => {},
+        },
+      },
+    });
+
+    return client;
+  }
+
+  clear() {
+    this.pool.clear();
+  }
+
+  getSize(): number {
+    return this.pool.size;
+  }
+}
+
+// Singleton client pool instance
+const clientPool = new ClientPool();
+
+// Helper function to create authenticated client (now uses pool)
 // This creates a client with the access token that RLS policies can use
 // Use this for database/storage operations, NOT for token verification
 export const createAuthenticatedClient = (accessToken: string) => {
-  // Track client instance
-  const authClientId = supabaseMonitor.registerClient('authenticated');
-  
-  // Create client with auth token in headers
-  // The key is to also set it in the auth context for RLS
-  const client = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      // Custom storage that returns the token for RLS
-      storage: {
-        getItem: (key: string) => {
-          if (key === "sb-access-token") return accessToken;
-          if (key === "sb-refresh-token") return "";
-          return null;
-        },
-        setItem: () => {},
-        removeItem: () => {},
-      },
-    },
-  });
-
-  return client;
+  return clientPool.getClient(accessToken);
 };
 
 // Helper function to get public URL for uploaded files
