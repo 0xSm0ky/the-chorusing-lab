@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { serverDb } from '@/lib/server-database';
-import { getPublicUrl } from '@/lib/supabase';
+import { AUDIO_DIR } from '@/lib/local-database';
+import fs from 'fs';
+import path from 'path';
+
+// Get MIME type from extension
+function getMimeType(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    'mp3': 'audio/mpeg',
+    'wav': 'audio/wav',
+    'm4a': 'audio/mp4',
+    'ogg': 'audio/ogg',
+    'webm': 'audio/webm',
+  };
+  return mimeTypes[ext || ''] || 'application/octet-stream';
+}
 
 export async function GET(
   request: NextRequest,
@@ -24,33 +38,29 @@ export async function GET(
       );
     }
 
-    // Find the audio clip with this filename to get its storage path
-    const clips = await serverDb.getAudioClips();
-    const clip = clips.find(c => c.filename === filename);
+    // Build the file path
+    const filePath = path.join(AUDIO_DIR, filename);
     
-    if (!clip) {
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
       return NextResponse.json(
         { error: 'File not found' },
         { status: 404 }
       );
     }
 
-    // Get the public URL from Supabase
-    // Note: clip now needs to have storagePath property
-    const storagePath = (clip as any).storagePath;
-    if (!storagePath) {
-      // Fallback: try to construct path from clip data
-      const constructedPath = `${clip.uploadedBy}/${clip.filename}`;
-      const publicUrl = getPublicUrl(constructedPath);
-      
-      // Redirect to the Supabase public URL
-      return NextResponse.redirect(publicUrl);
-    }
-
-    const publicUrl = getPublicUrl(storagePath);
+    // Read file and return it
+    const fileBuffer = fs.readFileSync(filePath);
+    const mimeType = getMimeType(filename);
     
-    // Redirect to the Supabase public URL
-    return NextResponse.redirect(publicUrl);
+    return new NextResponse(fileBuffer, {
+      status: 200,
+      headers: {
+        'Content-Type': mimeType,
+        'Content-Length': fileBuffer.length.toString(),
+        'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
+      },
+    });
     
   } catch (error) {
     console.error('File serving error:', error);

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { serverDb } from '@/lib/server-database';
-import { uploadAudioFile, createAuthenticatedClient, verifyAccessToken } from '@/lib/supabase';
+import { localDb, AUDIO_DIR } from '@/lib/local-database';
 import type { AudioMetadata } from '@/types/audio';
+import fs from 'fs';
+import path from 'path';
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB for local storage
 const SUPPORTED_FORMATS = ['mp3', 'wav', 'm4a', 'ogg', 'webm'];
 
 function generateUniqueFilename(originalName: string): string {
@@ -27,78 +28,44 @@ function validateFile(file: File): string | null {
   return null;
 }
 
-// Helper function to calculate audio duration from file
-async function calculateAudioDuration(file: File): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const audio = new Audio();
-    const objectUrl = URL.createObjectURL(file);
-    
-    const cleanup = () => {
-      URL.revokeObjectURL(objectUrl);
-    };
-    
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('Audio duration calculation timeout'));
-    }, 10000); // 10 second timeout
-    
-    audio.addEventListener('loadedmetadata', () => {
-      clearTimeout(timeout);
-      cleanup();
-      
-      const duration = audio.duration;
-      
-      if (!duration || isNaN(duration) || duration <= 0 || !isFinite(duration)) {
-        reject(new Error('Invalid audio duration from file metadata'));
-        return;
-      }
-      
-      resolve(duration);
-    });
-    
-    audio.addEventListener('error', (e) => {
-      clearTimeout(timeout);
-      cleanup();
-      reject(new Error('Failed to load audio for duration calculation'));
-    });
-    
-    audio.src = objectUrl;
-  });
+// Helper to parse user from local token
+function getUserFromToken(request: NextRequest): { userId: string; username: string } | null {
+  const authHeader = request.headers.get("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  
+  const token = authHeader.substring(7);
+  if (!token.startsWith("local-token-")) {
+    return null;
+  }
+  
+  // For local auth, user info is passed in X-User-Id header
+  const userId = request.headers.get("X-User-Id");
+  const username = request.headers.get("X-Username") || "Unknown";
+  
+  if (userId) {
+    return { userId, username };
+  }
+  
+  return null;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('🚀 Upload request received')
+    console.log('🚀 Local upload request received');
     
-    // Get auth token from Authorization header
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('❌ Missing or invalid Authorization header')
+    // Get user from auth header
+    const user = getUserFromToken(request);
+    if (!user) {
+      console.error('❌ No authentication provided');
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       );
     }
 
-    const accessToken = authHeader.substring(7); // Remove 'Bearer ' prefix
-    console.log('🔑 Authenticating user...')
-
-    // Verify the token using JWT decoding
-    const { user, error: authError } = await verifyAccessToken(accessToken);
-    
-    if (authError || !user) {
-      console.error('❌ Authentication failed:', authError?.message || 'User not found');
-      return NextResponse.json(
-        { error: 'Invalid authentication' },
-        { status: 401 }
-      );
-    }
-
-    const userId = user.id;
-    console.log('✅ User authenticated:', userId)
-
-    // Create authenticated client for database/storage operations (needs custom storage for RLS)
-    const authenticatedClient = createAuthenticatedClient(accessToken);
+    console.log('✅ User authenticated:', user.username);
 
     // Parse form data
     const formData = await request.formData();
@@ -114,8 +81,7 @@ export async function POST(request: NextRequest) {
     const sourceUrl = formData.get('sourceUrl') as string;
     const tags = formData.get('tags') as string;
 
-    console.log('📝 Processing upload:', title, `(${file?.size} bytes)`)
-    console.log('⏱️ Duration from form:', durationStr, typeof durationStr)
+    console.log('📝 Processing upload:', title, `(${file?.size} bytes)`);
 
     // Validate required fields
     if (!file) {
@@ -148,40 +114,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate duration - try form data first, then calculate from file
-    let duration: number;
-    
-    if (durationStr && !isNaN(Number(durationStr)) && Number(durationStr) > 0 && isFinite(Number(durationStr))) {
+    // Get duration from form data
+    let duration: number = 0;
+    if (durationStr && !isNaN(Number(durationStr)) && Number(durationStr) > 0) {
       duration = Number(durationStr);
-      console.log('✅ Using form duration:', duration)
-    } else {
-      console.log('⚠️ Invalid or missing duration from form, calculating from file...')
-      try {
-        duration = await calculateAudioDuration(file);
-        console.log('✅ Calculated duration from file:', duration)
-      } catch (error) {
-        console.error('❌ Failed to calculate duration:', error)
-        return NextResponse.json(
-          { error: 'Could not determine audio duration. Please try again with a valid audio file.' },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Final validation of duration
-    if (!duration || isNaN(duration) || duration <= 0 || !isFinite(duration)) {
-      console.error('❌ Invalid duration detected:', duration, typeof duration)
-      return NextResponse.json(
-        { error: 'Invalid audio duration detected. Please try a different audio file.' },
-        { status: 400 }
-      );
-    }
-    
-    if (duration > 300) { // 5 minutes max
-      return NextResponse.json(
-        { error: 'Audio file too long. Maximum duration is 5 minutes for direct uploads.' },
-        { status: 400 }
-      );
     }
 
     // Validate speaker age range if provided
@@ -206,10 +142,21 @@ export async function POST(request: NextRequest) {
     const filename = generateUniqueFilename(file.name);
 
     try {
-      // Upload file to Supabase Storage using authenticated client
-      console.log('📤 Uploading file to Supabase Storage...');
-      const storagePath = await uploadAudioFile(file, userId, filename, authenticatedClient);
-      console.log('✅ File uploaded successfully:', storagePath);
+      // Save file locally
+      console.log('📤 Saving file locally...');
+      
+      // Ensure audio directory exists
+      if (!fs.existsSync(AUDIO_DIR)) {
+        fs.mkdirSync(AUDIO_DIR, { recursive: true });
+      }
+      
+      // Convert file to buffer and save
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const filePath = path.join(AUDIO_DIR, filename);
+      fs.writeFileSync(filePath, buffer);
+      
+      console.log('✅ File saved successfully:', filePath);
 
       // Prepare metadata
       const metadata: AudioMetadata = {
@@ -222,22 +169,20 @@ export async function POST(request: NextRequest) {
         tags: tags ? tags.split(',').map(tag => tag.trim()).filter(Boolean) : [],
       };
 
-      // Save to database using authenticated context
+      // Save to local database
       console.log('💾 Saving clip metadata to database...');
-      console.log('💾 Duration being saved:', duration, typeof duration);
       
-      const audioClip = await serverDb.createAudioClip({
+      const audioClip = await localDb.createClip({
         title: title.trim(),
-        duration: duration, // Ensure this is a valid number
+        duration,
         filename,
         originalFilename: file.name,
         fileSize: file.size,
-        storagePath,
         metadata,
-        uploadedBy: userId,
-      }, accessToken); // Pass the access token here
+        uploadedBy: user.userId,
+      });
 
-      console.log('✅ Upload complete:', audioClip.title)
+      console.log('✅ Upload complete:', audioClip.title);
 
       return NextResponse.json({
         success: true,

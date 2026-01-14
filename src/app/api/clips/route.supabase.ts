@@ -1,37 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { localDb } from "@/lib/local-database";
-import type { AudioFilters, AudioSort } from "@/types/audio";
+import { createClient } from "@supabase/supabase-js";
+import { serverDb } from "@/lib/server-database";
+import { getPublicUrl, createAuthenticatedClient } from "@/lib/supabase";
+import type { AudioClip, AudioFilters, AudioSort } from "@/types/audio";
+import type { Database } from "@/types/supabase";
 
 export const dynamic = "force-dynamic";
-
-// Helper to parse user from local token (stored in localStorage on client)
-function getUserFromToken(request: NextRequest): { userId: string; username: string } | null {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  if (!token.startsWith("local-token-")) {
-    return null;
-  }
-  
-  // For local auth, user info is passed in X-User-Id header
-  const userId = request.headers.get("X-User-Id");
-  const username = request.headers.get("X-Username") || "Unknown";
-  
-  if (userId) {
-    return { userId, username };
-  }
-  
-  return null;
-}
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const user = getUserFromToken(request);
-    const userId = user?.userId || null;
+
+    // Get user from auth header if present
+    let userId: string | null = null;
+    let accessToken: string | null = null;
+    const authHeader = request.headers.get("Authorization");
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      accessToken = authHeader.substring(7);
+      const authenticatedClient = createAuthenticatedClient(accessToken);
+
+      const {
+        data: { user },
+      } = await authenticatedClient.auth.getUser();
+      if (user) {
+        userId = user.id;
+      }
+    }
 
     // Parse filters
     const filters: AudioFilters = {};
@@ -47,7 +42,10 @@ export async function GET(request: NextRequest) {
     }
 
     const speakerAgeRange = searchParams.get("speakerAgeRange");
-    if (speakerAgeRange && ["teen", "younger-adult", "adult", "senior"].includes(speakerAgeRange)) {
+    if (
+      speakerAgeRange &&
+      ["teen", "younger-adult", "adult", "senior"].includes(speakerAgeRange)
+    ) {
       filters.speakerAgeRange = speakerAgeRange as any;
     }
 
@@ -63,7 +61,10 @@ export async function GET(request: NextRequest) {
 
     const tagsParam = searchParams.get("tags");
     if (tagsParam) {
-      filters.tags = tagsParam.split(",").map((tag) => tag.trim()).filter(Boolean);
+      filters.tags = tagsParam
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
     }
 
     const speedFilter = searchParams.get("speedFilter");
@@ -75,6 +76,7 @@ export async function GET(request: NextRequest) {
     const showStarred = searchParams.get("starred") === "true";
     const showMyUploads = searchParams.get("myUploads") === "true";
 
+    // Apply user-specific filters
     if (showMyUploads && userId) {
       filters.uploadedBy = userId;
     }
@@ -86,7 +88,10 @@ export async function GET(request: NextRequest) {
     };
 
     const sortField = searchParams.get("sortField");
-    if (sortField && ["title", "duration", "language", "createdAt", "voteScore", "difficulty", "charactersPerSecond"].includes(sortField)) {
+    if (
+      sortField &&
+      ["title", "duration", "language", "createdAt", "voteScore", "difficulty", "charactersPerSecond"].includes(sortField)
+    ) {
       sort.field = sortField as any;
     }
 
@@ -95,33 +100,101 @@ export async function GET(request: NextRequest) {
       sort.direction = sortDirection as "asc" | "desc";
     }
 
-    // Get clips from local database
-    const clips = await localDb.getClips(
-      filters,
-      sort,
-      { starredByUserId: showStarred && userId ? userId : undefined }
-    );
+    // Parse limit
+    const limitParam = searchParams.get("limit");
+    const limit = limitParam ? parseInt(limitParam) : undefined;
 
-    // Add URLs and discovery info to clips
-    const clipsWithUrls = await Promise.all(
+    // For discovery fields, we need to sort in-memory, so use a default DB sort
+    // Discovery fields: voteScore, difficulty, charactersPerSecond
+    const isDiscoverySort = sort.field === "voteScore" || sort.field === "difficulty" || sort.field === "charactersPerSecond";
+    const dbSort: AudioSort = isDiscoverySort 
+      ? { field: "createdAt", direction: "desc" } 
+      : sort;
+
+    // Get clips from database with auth context
+    // Note: speedFilter is handled in-memory after we get discovery stats
+    const dbFilters = { ...filters };
+    delete (dbFilters as any).speedFilter; // Remove speedFilter from DB query
+    
+    let clips: AudioClip[] = [];
+    try {
+      clips = await serverDb.getAudioClips(
+        dbFilters,
+        dbSort,
+        limit,
+        accessToken || undefined
+      );
+    } catch (error) {
+      console.error("Failed to fetch clips from database:", error);
+      // Return empty array instead of failing completely
+      // This allows the UI to still render, just with no clips
+      clips = [];
+    }
+
+    // Filter by starred clips if requested
+    if (showStarred && userId && accessToken) {
+      try {
+        const starredClipIds = await serverDb.getUserStarredClips(
+          userId,
+          accessToken
+        );
+        clips = clips.filter((clip) => starredClipIds.includes(clip.id));
+      } catch (error) {
+        console.warn("Failed to get starred clips, continuing without filter:", error);
+        // Continue without filtering - better than failing completely
+      }
+    }
+
+    // Add discovery stats, file URLs, and star info to clips
+    const clipsWithDiscovery = await Promise.all(
       clips.map(async (clip) => {
-        // Get votes
-        const votes = await localDb.getVotesForClip(clip.id);
-        
-        // Get user's vote
-        let userVote: 'up' | 'down' | null = null;
-        if (userId) {
-          userVote = await localDb.getUserVote(clip.id, userId);
+        // Get star info (existing functionality - wrap in try-catch for resilience)
+        let starredBy: string[] = [];
+        try {
+          starredBy = await serverDb.getClipStars(
+            clip.id,
+            accessToken || undefined
+          );
+        } catch (error) {
+          console.warn(`Failed to get stars for clip ${clip.id}:`, error);
         }
-        
-        // Check if starred by user
-        const isStarred = userId ? await localDb.isStarred(clip.id, userId) : false;
-        
-        // Calculate characters per second
-        const transcript = clip.metadata.transcript || '';
-        const charactersPerSecond = clip.duration > 0 
-          ? transcript.length / clip.duration 
-          : 0;
+
+        // Get difficulty rating (new - gracefully handle if table doesn't exist)
+        let difficultyRating: { average: number | null; count: number; userRating: number | null } = { average: null, count: 0, userRating: null };
+        try {
+          difficultyRating = await serverDb.getClipDifficultyRating(
+            clip.id,
+            accessToken || undefined
+          );
+        } catch (error) {
+          console.warn(`Failed to get difficulty rating for clip ${clip.id}:`, error);
+        }
+
+        // Get votes (new - gracefully handle if table doesn't exist)
+        let votes = { upvoteCount: 0, downvoteCount: 0, voteScore: 0, userVote: null as "up" | "down" | null };
+        try {
+          votes = await serverDb.getClipVotes(
+            clip.id,
+            accessToken || undefined
+          );
+        } catch (error) {
+          console.warn(`Failed to get votes for clip ${clip.id}:`, error);
+        }
+
+        // Calculate characters per second (no DB call, safe)
+        const charactersPerSecond = serverDb.calculateCharactersPerSecond(clip);
+
+        // Get the storage path for the clip - we need to handle both old and new format
+        let publicUrl: string;
+        const clipWithPath = clip as any;
+
+        if (clipWithPath.storagePath) {
+          // New format: use storage path
+          publicUrl = getPublicUrl(clipWithPath.storagePath);
+        } else {
+          // Fallback: construct path and use file serving API
+          publicUrl = `/api/files/${clip.filename}`;
+        }
 
         return {
           ...clip,
@@ -221,39 +294,10 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Clips listing error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch clips" },
-      { status: 500 }
-    );
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const user = getUserFromToken(request);
-    if (!user) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 }
-      );
-    }
-
-    const body = await request.json();
-    
-    const clip = await localDb.createClip({
-      title: body.title,
-      duration: body.duration,
-      filename: body.filename,
-      originalFilename: body.originalFilename,
-      fileSize: body.fileSize,
-      metadata: body.metadata,
-      uploadedBy: user.userId,
-    });
-
-    return NextResponse.json({ clip }, { status: 201 });
-  } catch (error) {
-    console.error("Clip creation error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create clip" },
+      {
+        error: error instanceof Error ? error.message : "Failed to fetch clips",
+        code: "FETCH_ERROR",
+      },
       { status: 500 }
     );
   }

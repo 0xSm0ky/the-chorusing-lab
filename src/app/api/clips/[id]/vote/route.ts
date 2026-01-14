@@ -1,8 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { serverDb } from "@/lib/server-database";
-import { verifyAccessToken } from "@/lib/supabase";
+import { localDb } from "@/lib/local-database";
 
 export const dynamic = "force-dynamic";
+
+// Helper to parse user from local token
+function getUserFromToken(request: NextRequest): { userId: string; username: string } | null {
+  const authHeader = request.headers.get("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  
+  const token = authHeader.substring(7);
+  if (!token.startsWith("local-token-")) {
+    return null;
+  }
+  
+  const userId = request.headers.get("X-User-Id");
+  const username = request.headers.get("X-Username") || "Unknown";
+  
+  if (userId) {
+    return { userId, username };
+  }
+  
+  return null;
+}
 
 export async function POST(
   request: NextRequest,
@@ -10,21 +31,11 @@ export async function POST(
 ) {
   try {
     const { id } = params;
-    const authHeader = request.headers.get("Authorization");
+    const user = getUserFromToken(request);
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!user) {
       return NextResponse.json(
         { error: "Authentication required" },
-        { status: 401 }
-      );
-    }
-
-    const accessToken = authHeader.substring(7);
-    const { user, error: authError } = await verifyAccessToken(accessToken);
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "Invalid authentication" },
         { status: 401 }
       );
     }
@@ -39,16 +50,16 @@ export async function POST(
       );
     }
 
-    await serverDb.voteClip(id, user.id, voteType, accessToken);
+    await localDb.setVote(id, user.userId, voteType);
 
     // Get updated vote stats
-    const voteStats = await serverDb.getClipVotes(id, accessToken);
+    const voteStats = await localDb.getVotesForClip(id);
 
     return NextResponse.json({
       success: true,
-      upvoteCount: voteStats.upvoteCount,
-      downvoteCount: voteStats.downvoteCount,
-      voteScore: voteStats.voteScore,
+      upvoteCount: voteStats.upvotes,
+      downvoteCount: voteStats.downvotes,
+      voteScore: voteStats.score,
     });
   } catch (error) {
     console.error("Vote error:", error);
@@ -65,35 +76,25 @@ export async function DELETE(
 ) {
   try {
     const { id } = params;
-    const authHeader = request.headers.get("Authorization");
+    const user = getUserFromToken(request);
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!user) {
       return NextResponse.json(
         { error: "Authentication required" },
         { status: 401 }
       );
     }
 
-    const accessToken = authHeader.substring(7);
-    const { user, error: authError } = await verifyAccessToken(accessToken);
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "Invalid authentication" },
-        { status: 401 }
-      );
-    }
-
-    await serverDb.removeClipVote(id, user.id, accessToken);
+    await localDb.setVote(id, user.userId, null);
 
     // Get updated vote stats
-    const voteStats = await serverDb.getClipVotes(id, accessToken);
+    const voteStats = await localDb.getVotesForClip(id);
 
     return NextResponse.json({
       success: true,
-      upvoteCount: voteStats.upvoteCount,
-      downvoteCount: voteStats.downvoteCount,
-      voteScore: voteStats.voteScore,
+      upvoteCount: voteStats.upvotes,
+      downvoteCount: voteStats.downvotes,
+      voteScore: voteStats.score,
     });
   } catch (error) {
     console.error("Remove vote error:", error);

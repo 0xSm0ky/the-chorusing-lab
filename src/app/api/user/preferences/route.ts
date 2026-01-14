@@ -1,33 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
-import { serverDb } from "@/lib/server-database";
-import { verifyAccessToken } from "@/lib/supabase";
+import { localDb } from "@/lib/local-database";
 import type { FilterPreferences } from "@/types/audio";
 
 export const dynamic = "force-dynamic";
 
+// Helper to parse user from local token
+function getUserFromToken(request: NextRequest): { userId: string; username: string } | null {
+  const authHeader = request.headers.get("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  
+  const token = authHeader.substring(7);
+  if (!token.startsWith("local-token-")) {
+    return null;
+  }
+  
+  const userId = request.headers.get("X-User-Id");
+  const username = request.headers.get("X-Username") || "Unknown";
+  
+  if (userId) {
+    return { userId, username };
+  }
+  
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("Authorization");
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 }
-      );
-    }
-
-    const accessToken = authHeader.substring(7);
-
-    // Verify token using standard client (no custom storage)
-    const { user, error: authError } = await verifyAccessToken(accessToken);
-
-    if (authError) {
-      console.error("❌ Token verification failed:", authError.message);
-      return NextResponse.json(
-        { error: "Invalid authentication" },
-        { status: 401 }
-      );
-    }
+    const user = getUserFromToken(request);
 
     if (!user) {
       return NextResponse.json(
@@ -36,10 +37,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const preferences = await serverDb.getUserFilterPreferences(
-      user.id,
-      accessToken
-    );
+    const preferences = await localDb.getFilterPreferences(user.userId);
 
     return NextResponse.json({ preferences });
   } catch (error) {
@@ -53,27 +51,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("Authorization");
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 }
-      );
-    }
-
-    const accessToken = authHeader.substring(7);
-
-    // Verify token using standard client (no custom storage)
-    const { user, error: authError } = await verifyAccessToken(accessToken);
-
-    if (authError) {
-      console.error("❌ Token verification failed:", authError.message);
-      return NextResponse.json(
-        { error: "Invalid authentication" },
-        { status: 401 }
-      );
-    }
+    const user = getUserFromToken(request);
 
     if (!user) {
       return NextResponse.json(
@@ -184,10 +162,9 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    await serverDb.saveUserFilterPreferences(
-      user.id,
-      preferences as FilterPreferences,
-      accessToken
+    await localDb.saveFilterPreferences(
+      user.userId,
+      preferences as FilterPreferences
     );
 
     return NextResponse.json({ success: true });
