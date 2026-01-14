@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { localDb } from "@/lib/local-database";
-import { serverDb } from "@/lib/server-database"; // Added missing import
 import type { AudioFilters, AudioSort } from "@/types/audio";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +25,17 @@ function getUserFromToken(request: NextRequest): { userId: string; username: str
   }
 
   return null;
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-User-Id, X-Username',
+    },
+  });
 }
 
 export async function GET(request: NextRequest) {
@@ -126,7 +136,7 @@ export async function GET(request: NextRequest) {
 
         return {
           ...clip,
-          url: "https://example.com/clip-url", // Placeholder for publicUrl
+          url: `/api/files/${clip.filename}`, // Proper local URL for audio files
           starCount: 0, // Placeholder for starredBy.length
           isStarredByUser: isStarred,
           difficultyRating: 0, // Placeholder for difficultyRating.average
@@ -144,7 +154,21 @@ export async function GET(request: NextRequest) {
     // Calculate speed percentiles for filtering
     let speedPercentiles: { slow: number; medium: number; fast: number } | null = null;
     if (filters.speedFilter) {
-      speedPercentiles = serverDb.getSpeedPercentiles(clipsWithUrls);
+      // Use a simple calculation for speed percentiles based on clipsWithUrls
+      const charactersPerSecondValues = clipsWithUrls
+        .map(clip => clip.charactersPerSecond)
+        .filter((cps): cps is number => cps !== undefined)
+        .sort((a, b) => a - b);
+      
+      if (charactersPerSecondValues.length > 0) {
+        const slowIndex = Math.floor(charactersPerSecondValues.length * 0.33);
+        const mediumIndex = Math.floor(charactersPerSecondValues.length * 0.66);
+        speedPercentiles = {
+          slow: charactersPerSecondValues[slowIndex],
+          medium: charactersPerSecondValues[mediumIndex],
+          fast: charactersPerSecondValues[charactersPerSecondValues.length - 1]
+        };
+      }
     }
 
     // Apply speed filter if requested
@@ -173,14 +197,14 @@ export async function GET(request: NextRequest) {
         let bValue: number | null = null;
 
         if (sort.field === "voteScore") {
-          aValue = (a as any).voteScore ?? 0;
-          bValue = (b as any).voteScore ?? 0;
+          aValue = a.voteScore ?? 0;
+          bValue = b.voteScore ?? 0;
         } else if (sort.field === "difficulty") {
-          aValue = (a as any).difficultyRating ?? null;
-          bValue = (b as any).difficultyRating ?? null;
+          aValue = a.difficultyRating ?? null;
+          bValue = b.difficultyRating ?? null;
         } else if (sort.field === "charactersPerSecond") {
-          aValue = (a as any).charactersPerSecond ?? null;
-          bValue = (b as any).charactersPerSecond ?? null;
+          aValue = a.charactersPerSecond ?? null;
+          bValue = b.charactersPerSecond ?? null;
         } else {
           // Fallback for other fields (shouldn't reach here, but handle gracefully)
           return 0;
@@ -208,16 +232,18 @@ export async function GET(request: NextRequest) {
           speedCategory = "fast";
         }
       }
-
-      return {
-        ...clip,
-        speedCategory,
-      };
+      return { ...clip, speedCategory };
     });
 
     return NextResponse.json({
       clips: clipsWithSpeedCategory,
       total: clipsWithSpeedCategory.length,
+    }, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-User-Id, X-Username',
+      }
     });
   } catch (error) {
     console.error("Clips listing error:", error);
