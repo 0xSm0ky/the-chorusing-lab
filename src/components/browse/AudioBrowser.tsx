@@ -30,6 +30,7 @@ import type { AudioClip, AudioFilters, AudioSort, FilterPreferences } from "@/ty
 
 interface AudioBrowserProps {
   onRefresh?: () => void;
+  onClipsLoaded?: (clips: AudioClip[]) => void;
 }
 
 interface ClipWithStarInfo extends AudioClip {
@@ -47,7 +48,7 @@ interface ClipWithStarInfo extends AudioClip {
   speedCategory?: "slow" | "medium" | "fast";
 }
 
-export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
+export function AudioBrowser({ onRefresh, onClipsLoaded }: AudioBrowserProps) {
   const { user, getAuthHeaders } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -118,6 +119,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   const showMyUploadsRef = useRef(showMyUploads);
   const fetchClipsRef = useRef<typeof fetchClips>();
   const clipsLengthRef = useRef(clips.length);
+  const fetchCountRef = useRef(0);
 
   // Refs for preference management
   const preferencesLoadedRef = useRef(false);
@@ -417,6 +419,9 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
   }, [user, searchParams, getAuthHeaders, updateURL, searchTerm]);
 
   const fetchClips = useCallback(async (isFilterChange: boolean = false, retryCount = 0) => {
+    fetchCountRef.current += 1;
+    console.log(`🔄 fetchClips called #${fetchCountRef.current} (isFilterChange=${isFilterChange}, retry=${retryCount})`);
+
     // Only set loading: true on initial load, not when filters change
     if (isFilterChange) {
       setIsFiltering(true);
@@ -506,16 +511,18 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
       // Gracefully handle partial data
       if (data.clips && Array.isArray(data.clips)) {
         setClips(data.clips);
+        onClipsLoaded?.(data.clips);
       } else {
         // If response format is unexpected, show empty array instead of error
         console.warn("Unexpected response format from /api/clips:", data);
         setClips([]);
+        onClipsLoaded?.([]);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to load clips";
       
       // Don't show error if we have existing clips (graceful degradation)
-      if (clips.length > 0 && isFilterChange) {
+      if (clipsLengthRef.current > 0 && isFilterChange) {
         console.warn("Failed to update clips:", errorMessage);
         // Keep existing clips visible
       } else {
@@ -528,7 +535,7 @@ export function AudioBrowser({ onRefresh }: AudioBrowserProps) {
         setLoading(false);
       }
     }
-  }, [filters, sort, showStarred, showMyUploads, getAuthHeaders, clips.length]);
+  }, [filters, sort, showStarred, showMyUploads, getAuthHeaders, onClipsLoaded]);
 
   // Initial load - wait for preferences to load AND be applied first, then fetch with correct filters
   useEffect(() => {

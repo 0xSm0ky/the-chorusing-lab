@@ -11,9 +11,11 @@ import {
   Library,
   LogIn,
   UserPlus,
+  Youtube,
 } from "lucide-react";
 import Link from "next/link";
 import { AudioEditor } from "@/components/audio/AudioEditor";
+import { YouTubeDownloader } from "@/components/audio/YouTubeDownloader";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { UploadModal } from "@/components/upload/UploadModal";
@@ -74,6 +76,12 @@ export default function ClipCreatorPage() {
   const handleNewFile = () => {
     setSelectedFile(null);
     setSourceUrl("");
+    setFileError(null);
+  };
+
+  const handleYouTubeAudioReady = (file: File, videoSourceUrl: string) => {
+    setSelectedFile(file);
+    setSourceUrl(videoSourceUrl);
     setFileError(null);
   };
 
@@ -304,8 +312,27 @@ export default function ClipCreatorPage() {
 
               {/* Download Instructions */}
               <div className="mt-8 max-w-4xl mx-auto bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                    <Youtube className="w-5 h-5 text-red-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Download from YouTube
+                    </h3>
+                    <p className="text-sm text-gray-500">
+                      Paste a YouTube URL to download the audio and create clips
+                    </p>
+                  </div>
+                </div>
+
+                <YouTubeDownloader onAudioReady={handleYouTubeAudioReady} />
+              </div>
+
+              {/* Other download sources */}
+              <div className="mt-6 max-w-4xl mx-auto bg-white rounded-xl p-6 shadow-sm border border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                  How to Download Audio
+                  Other Audio Sources
                 </h3>
                 <div className="space-y-4 text-sm text-gray-700">
                   <p>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, AlertCircle, Play } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, Play, Repeat, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { ChorusingPlayer } from "@/components/chorus/ChorusingPlayer";
 import { TranscriptionPractice } from "@/components/chorus/TranscriptionPractice";
@@ -35,11 +35,59 @@ export default function ChorusPage() {
   const [clip, setClip] = useState<ClipWithUrl | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loopCount, setLoopCount] = useState(0);
+  const fetchCountRef = useRef(0);
+
+  // Load loop count from localStorage on mount / clipId change
+  useEffect(() => {
+    if (!clipId) return;
+    try {
+      const stored = localStorage.getItem(`chorus-loops-${clipId}`);
+      if (stored) {
+        const parsed = parseInt(stored, 10);
+        if (!isNaN(parsed)) setLoopCount(parsed);
+      } else {
+        setLoopCount(0);
+      }
+    } catch {
+      setLoopCount(0);
+    }
+  }, [clipId]);
+
+  // Persist loop count to localStorage whenever it changes
+  useEffect(() => {
+    if (!clipId || loopCount === 0) return;
+    try {
+      localStorage.setItem(`chorus-loops-${clipId}`, String(loopCount));
+    } catch {
+      // localStorage full or unavailable — ignore
+    }
+  }, [clipId, loopCount]);
+
+  // Handler for when a loop iteration (or full play-through) completes
+  const handleLoopComplete = useCallback(() => {
+    setLoopCount((prev: number) => prev + 1);
+  }, []);
+
+  // Reset loop counter
+  const handleResetLoopCount = useCallback(() => {
+    setLoopCount(0);
+    if (clipId) {
+      try {
+        localStorage.removeItem(`chorus-loops-${clipId}`);
+      } catch {
+        // ignore
+      }
+    }
+  }, [clipId]);
 
   // Fetch clip data - REVERTED TO ORIGINAL WORKING VERSION
   useEffect(() => {
     const fetchClip = async () => {
       if (!clipId) return;
+
+      fetchCountRef.current += 1;
+      console.log(`🎯 [Chorus] fetchClip called #${fetchCountRef.current} for clipId=${clipId}`);
 
       setLoading(true);
       setError(null);
@@ -308,6 +356,31 @@ export default function ChorusPage() {
                         }}
                       />
                     </div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-700 mb-2">
+                        Practice Loops
+                      </div>
+                      <div className="flex items-center gap-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg px-4 py-3 border border-indigo-200">
+                        <Repeat className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+                        <div className="flex-1">
+                          <span className="text-2xl font-bold text-indigo-700">
+                            {loopCount}
+                          </span>
+                          <span className="text-sm text-indigo-500 ml-1.5">
+                            {loopCount === 1 ? "loop" : "loops"}
+                          </span>
+                        </div>
+                        {loopCount > 0 && (
+                          <button
+                            onClick={handleResetLoopCount}
+                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                            title="Reset loop count"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -316,6 +389,7 @@ export default function ChorusPage() {
               <ChorusingPlayer
                 key={playerClip.id} // Key by ID to force remount only on clip change
                 clip={playerClip}
+                onLoopComplete={handleLoopComplete}
               />
 
               {/* Transcription Practice - Use the mutable clip for updates */}

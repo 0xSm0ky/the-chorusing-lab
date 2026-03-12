@@ -24,6 +24,7 @@ let _activeWs: any | null = null;
 
 interface ChorusingPlayerProps {
   clip: AudioClip & { url: string };
+  onLoopComplete?: () => void;
 }
 interface AudioRegion {
   id: string;
@@ -31,7 +32,7 @@ interface AudioRegion {
   end: number;
 }
 
-export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
+export function ChorusingPlayer({ clip, onLoopComplete }: ChorusingPlayerProps) {
   const waveformRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<any>(null);
   const regionsRef = useRef<any>(null);
@@ -55,6 +56,7 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
   // Use refs for loop and region state to avoid stale closures in event handlers
   const loopRef = useRef(false);
   const regionRef = useRef<AudioRegion | null>(null);
+  const onLoopCompleteRef = useRef(onLoopComplete);
 
   // Sync refs with state
   useEffect(() => {
@@ -64,6 +66,10 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
   useEffect(() => {
     regionRef.current = region;
   }, [region]);
+
+  useEffect(() => {
+    onLoopCompleteRef.current = onLoopComplete;
+  }, [onLoopComplete]);
 
   /* ----------  Robust destroy helper  ------------------------------ */
   const destroy = useCallback((ws?: any) => {
@@ -229,6 +235,11 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
 
           if (currentLoop) {
             // Loop is enabled - handle looping directly in finish event
+            // Only notify if there's no region - region loops are counted by the interval checker
+            if (!currentRegion) {
+              onLoopCompleteRef.current?.();
+            }
+
             // Temporarily disable regions to allow seeks
             const regions = regionsRef.current;
             let regionsWereEnabled = false;
@@ -260,6 +271,10 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
             }
           } else {
             // Loop is disabled - stop playback
+            // Still counts as a completed play-through (only if no region, region boundary is handled by interval)
+            if (!currentRegion) {
+              onLoopCompleteRef.current?.();
+            }
             setIsPlaying(false);
           }
         });
@@ -681,6 +696,7 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
 
           if (currentLoop) {
             // Loop: seek back to region start
+            onLoopCompleteRef.current?.();
             try {
               ws.seekTo(currentRegion.start / dur);
               ws.play();
@@ -689,6 +705,7 @@ export function ChorusingPlayer({ clip }: ChorusingPlayerProps) {
             }
           } else {
             // No loop: stop at region end
+            onLoopCompleteRef.current?.();
             ws.pause();
             setIsPlaying(false);
           }

@@ -1,20 +1,24 @@
 "use client";
 
-import { useState, Suspense } from "react";
-import { AudioLines, LogIn, UserPlus, Upload, Scissors } from "lucide-react";
+import { useState, useCallback, Suspense } from "react";
+import { AudioLines, LogIn, UserPlus, Upload, Scissors, Download } from "lucide-react";
 import Link from "next/link";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { UploadModal } from "@/components/upload/UploadModal";
+import { ClipImportExportModal } from "@/components/bulk-upload/ClipImportExportModal";
 import { AudioBrowser } from "@/components/browse/AudioBrowser";
 import { useAuth } from "@/lib/auth";
+import type { AudioClip } from "@/types/audio";
 
 export default function LibraryPage() {
   const { user, isLoading } = useAuth();
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [importExportOpen, setImportExportOpen] = useState(false);
   const [refreshBrowser, setRefreshBrowser] = useState(0);
+  const [clips, setClips] = useState<AudioClip[]>([]);
 
   const openAuthModal = (mode: "login" | "register") => {
     setAuthMode(mode);
@@ -22,8 +26,12 @@ export default function LibraryPage() {
   };
 
   const handleUploadSuccess = () => {
-    setRefreshBrowser((prev) => prev + 1);
+    setRefreshBrowser((prev: number) => prev + 1);
   };
+
+  const handleRefresh = useCallback(() => {
+    setRefreshBrowser((prev: number) => prev + 1);
+  }, []);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -47,6 +55,13 @@ export default function LibraryPage() {
                   <Scissors className="w-4 h-4" />
                   Clip Creator
                 </Link>
+                <button
+                  onClick={() => setImportExportOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Import/Export
+                </button>
                 <button
                   onClick={() => setUploadModalOpen(true)}
                   className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
@@ -93,7 +108,8 @@ export default function LibraryPage() {
             >
               <AudioBrowser
                 key={`${refreshBrowser}-${user?.id}`}
-                onRefresh={() => setRefreshBrowser((prev) => prev + 1)}
+                onRefresh={handleRefresh}
+                onClipsLoaded={setClips}
               />
             </Suspense>
           </div>
@@ -112,6 +128,17 @@ export default function LibraryPage() {
           isOpen={uploadModalOpen}
           onClose={() => setUploadModalOpen(false)}
           onSuccess={handleUploadSuccess}
+        />
+      )}
+
+      {user && (
+        <ClipImportExportModal
+          isOpen={importExportOpen}
+          onClose={() => setImportExportOpen(false)}
+          clips={clips}
+          onImportSuccess={() => {
+            setRefreshBrowser((prev: number) => prev + 1);
+          }}
         />
       )}
     </main>

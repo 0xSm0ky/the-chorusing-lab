@@ -11,13 +11,13 @@ const nextConfig = {
         "localhost:3000",
         process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
         process.env.NEXT_PUBLIC_VERCEL_URL
-          ? process.env.NEXT_PUBLIC_VERCEL_URL
+          ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
           : null,
       ].filter(Boolean),
       bodySizeLimit: "50mb",
     },
     // Packages that should not be bundled (for server-side)
-    serverComponentsExternalPackages: [],
+    serverComponentsExternalPackages: ["archiver", "unzipper"],
   },
 
   // Audio file handling
@@ -31,6 +31,11 @@ const nextConfig = {
       },
     });
 
+    // Keep archiver and unzipper as external Node.js requires on the server
+    if (isServer) {
+      config.externals = config.externals || [];
+      config.externals.push('archiver', 'unzipper');
+    }
 
     // Optimize for audio processing
     if (!isServer) {
