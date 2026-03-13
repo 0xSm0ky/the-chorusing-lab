@@ -9,6 +9,9 @@ export const metadata: Metadata = {
   title: "Chorus Lab - Language Learning Through Chorusing",
   description:
     "Master languages through chorusing - the powerful technique of playing and repeating audio clips for perfect pronunciation",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
