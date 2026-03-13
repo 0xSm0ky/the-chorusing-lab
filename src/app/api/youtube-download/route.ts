@@ -15,7 +15,10 @@ const COOKIES_PATH = path.join(process.cwd(), "youtube-cookies.txt");
 
 // Build the yt-dlp base command, including cookies if the file exists
 function getYtDlpBase(): string {
-  let cmd = `yt-dlp --js-runtimes "node:/usr/bin/node"`;
+  // Use the Node binary running this process as the JS runtime; fall back to /usr/bin/node
+  const nodePath = process.execPath || "/usr/bin/node";
+  // Ask yt-dlp to use remote EJS components from GitHub if local solver is missing
+  let cmd = `yt-dlp --js-runtimes "node:${nodePath}" --remote-components ejs:github`;
   if (fs.existsSync(COOKIES_PATH)) {
     cmd += ` --cookies ${JSON.stringify(COOKIES_PATH)}`;
   }
@@ -115,80 +118,70 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid YouTube URL" }, { status: 400 });
   }
 
-  const tmpDir = os.tmpdir();
+  // persist downloads under project so they survive container restarts
+  const storageDir = path.join(process.cwd(), "local-data", "downloads");
+  if (!fs.existsSync(storageDir)) fs.mkdirSync(storageDir, { recursive: true });
   const downloadId = `yt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const outputTemplate = path.join(tmpDir, `${downloadId}.%(ext)s`);
+  const outputTemplate = path.join(storageDir, `${downloadId}.%(ext)s`);
 
   try {
     const ytdlp = getYtDlpBase();
 
     // Download audio only, convert to mp3
     console.log(`📥 yt-dlp: Downloading audio from ${url}`);
+    // Disable yt-dlp progress lines to keep server logs clean
     const { stdout, stderr } = await execAsync(
-      `${ytdlp} -x --audio-format mp3 --audio-quality 0 -o ${JSON.stringify(outputTemplate)} --no-playlist --max-filesize 100M ${JSON.stringify(url)}`,
+      `${ytdlp} --no-progress -x --audio-format mp3 --audio-quality 0 -o ${JSON.stringify(outputTemplate)} --no-playlist --max-filesize 100M ${JSON.stringify(url)}`,
       { timeout: 300000 } // 5 minute timeout for longer videos
     );
 
-    console.log("yt-dlp stdout:", stdout);
-    if (stderr) console.log("yt-dlp stderr:", stderr);
+    // Only log short summaries, not progress spamming
+    if (stdout && stdout.length < 2000) console.log("yt-dlp stdout:", stdout);
+    if (stderr && stderr.length < 2000) console.log("yt-dlp stderr:", stderr);
 
-    // Find the output file
-    const mp3Path = path.join(tmpDir, `${downloadId}.mp3`);
+    // Save file(s) into storageDir and return info (do not delete)
+    const files = fs.readdirSync(storageDir).filter((f) => f.startsWith(downloadId));
+    if (files.length === 0) {
+      throw new Error("Download completed but output file not found");
+    }
+    const actualFile = files[0];
+    const actualPath = path.join(storageDir, actualFile);
+    const stat = fs.statSync(actualPath);
+    const ext = path.extname(actualFile).slice(1) || "mp3";
+    let title = providedTitle || actualFile.replace(/\.[^/.]+$/, "");
 
-    if (!fs.existsSync(mp3Path)) {
-      // yt-dlp might have kept the original format, look for any file with our ID
-      const files = fs.readdirSync(tmpDir).filter((f) => f.startsWith(downloadId));
-      if (files.length === 0) {
-        throw new Error("Download completed but output file not found");
-      }
-      // Use the first matching file
-      const actualPath = path.join(tmpDir, files[0]);
-      const audioBuffer = fs.readFileSync(actualPath);
-      const ext = path.extname(files[0]).slice(1);
-
-      let title = providedTitle || "youtube-audio";
-      // Sanitize only characters that are invalid in filenames, keep unicode
-      let safeTitle = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 200);
-
-      // Cleanup
-      try { fs.unlinkSync(actualPath); } catch { /* ignore */ }
-
-      return new NextResponse(audioBuffer, {
-        status: 200,
-        headers: {
-          "Content-Type": ext === "mp3" ? "audio/mpeg" : `audio/${ext}`,
-          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(safeTitle)}.${ext}`,
-          "X-Audio-Title": encodeURIComponent(title),
-        },
-      });
+    // After the MP3 is downloaded, generate waveform data
+    const waveformFile = path.join(storageDir, `${downloadId}.json`);
+    let waveformUrl: string | undefined;
+    try {
+      console.log(`📊 Generating waveform data for ${actualPath}`);
+      await execAsync(
+        `audiowaveform -i ${JSON.stringify(actualPath)} -o ${JSON.stringify(waveformFile)} --pixels-per-second 50 --bits 8`,
+        { timeout: 60000 } // 1 minute timeout
+      );
+      console.log(`✅ Waveform data saved: ${waveformFile}`);
+      waveformUrl = `/api/files/${encodeURIComponent(path.basename(waveformFile))}`;
+    } catch (waveformError) {
+      console.error("Failed to generate waveform data:", waveformError);
+      // Waveform is optional - continue without it
     }
 
-    const audioBuffer = fs.readFileSync(mp3Path);
-
-    let title = providedTitle || "youtube-audio";
-    let safeTitle = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 200);
-
-    // Cleanup
-    try { fs.unlinkSync(mp3Path); } catch { /* ignore */ }
-
-    console.log(`✅ yt-dlp: Downloaded ${audioBuffer.length} bytes for "${title}"`);
-
-    return new NextResponse(audioBuffer, {
-      status: 200,
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(safeTitle)}.mp3`,
-        "X-Audio-Title": encodeURIComponent(title),
-      },
+    return NextResponse.json({
+      success: true,
+      filename: actualFile,
+      size: stat.size,
+      url: `/api/files/${encodeURIComponent(actualFile)}`,
+      title,
+      ...(waveformUrl && { waveformUrl }),
     });
   } catch (error: any) {
     console.error("yt-dlp download error:", error);
 
-    // Cleanup any partial files
+    // Cleanup any partial files from storageDir
     try {
-      const files = fs.readdirSync(tmpDir).filter((f) => f.startsWith(downloadId));
+      const files = fs.readdirSync(storageDir).filter((f) => f.startsWith(downloadId));
       files.forEach((f) => {
-        try { fs.unlinkSync(path.join(tmpDir, f)); } catch { /* ignore */ }
+        try { fs.unlinkSync(path.join(storageDir, f)); } catch { /* ignore */ }
       });
     } catch { /* ignore */ }
 

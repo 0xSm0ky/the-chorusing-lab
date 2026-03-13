@@ -1,7 +1,11 @@
-# Use Node 18
-FROM node:18-alpine
+# Use Node 20 (yt-dlp requires Node >= 20 for JS runtime)
+FROM node:20-alpine
 
 WORKDIR /app
+
+# Install yt-dlp via pip with EJS challenge solver scripts, plus ffmpeg
+RUN apk add --no-cache python3 py3-pip ffmpeg \
+    && pip3 install --break-system-packages "yt-dlp[default]"
 
 # Install pnpm
 RUN npm install -g pnpm

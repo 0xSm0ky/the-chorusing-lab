@@ -49,15 +49,23 @@ export async function GET(
       );
     }
 
-    // Build the file path
-    const filePath = path.join(AUDIO_DIR, filename);
-    
-    // Check if file exists
+    // Build the file path. First check the normal clips/audio directory,
+    // then fall back to the downloads directory where yt-dlp stores files.
+    const filePathAudio = path.join(AUDIO_DIR, filename);
+    const downloadsDir = path.join(process.cwd(), 'local-data', 'downloads');
+    let filePath = filePathAudio;
+
     if (!fs.existsSync(filePath)) {
-      return NextResponse.json(
-        { error: 'File not found' },
-        { status: 404 }
-      );
+      const alt = path.join(downloadsDir, filename);
+      if (fs.existsSync(alt)) {
+        filePath = alt;
+        console.log(`Serving file from downloads: ${filePath}`);
+      } else {
+        return NextResponse.json(
+          { error: 'File not found' },
+          { status: 404 }
+        );
+      }
     }
 
     // Read file and return it

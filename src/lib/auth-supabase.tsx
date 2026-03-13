@@ -157,9 +157,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let email =
           session.user.email || session.user.user_metadata?.email || "Unknown";
 
-        if (profile) {
-          username = profile.username;
-          email = profile.email;
+        if (profile && typeof profile === 'object' && 'username' in profile) {
+          username = (profile as any).username;
+          email = (profile as any).email;
         } else if (error) {
           // If generic error or not found, try to use metadata fallback
           console.warn(
@@ -175,7 +175,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   id: session.user.id,
                   username: session.user.user_metadata.username,
                   email: email,
-                },
+                } as any,
                 { onConflict: "id", ignoreDuplicates: true }
               );
             } catch (e) {

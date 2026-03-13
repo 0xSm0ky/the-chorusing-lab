@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Upload,
@@ -16,13 +17,15 @@ import {
 import Link from "next/link";
 import { AudioEditor } from "@/components/audio/AudioEditor";
 import { YouTubeDownloader } from "@/components/audio/YouTubeDownloader";
+import DownloadedAudio from "@/components/DownloadedAudio";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { UploadModal } from "@/components/upload/UploadModal";
 import { useAuth } from "@/lib/auth";
 
-export default function ClipCreatorPage() {
+function ClipCreatorContent() {
   const { user, isLoading, getAuthHeaders } = useAuth();
+  const searchParams = useSearchParams();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string>("");
   const [fileError, setFileError] = useState<string | null>(null);
@@ -30,6 +33,30 @@ export default function ClipCreatorPage() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Load file from query parameter (e.g., ?file=filename.mp3)
+  useEffect(() => {
+    const filename = searchParams.get("file");
+    if (filename) {
+      loadFileFromDownloads(filename);
+    }
+  }, [searchParams]);
+
+  const loadFileFromDownloads = async (filename: string) => {
+    try {
+      setFileError(null);
+      const response = await fetch(`/api/files/${encodeURIComponent(filename)}`);
+      if (!response.ok) {
+        throw new Error("Failed to load audio file");
+      }
+      const blob = await response.blob();
+      const file = new File([blob], filename, { type: blob.type });
+      setSelectedFile(file);
+    } catch (error) {
+      setFileError(`Could not load file: ${filename}`);
+      console.error("Error loading file:", error);
+    }
+  };
 
   const openAuthModal = (mode: "login" | "register") => {
     setAuthMode(mode);
@@ -108,31 +135,6 @@ export default function ClipCreatorPage() {
       processFile(file);
     }
   };
-
-  if (!user) {
-    return (
-      <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200 text-center">
-            <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">
-              Sign In Required
-            </h1>
-            <p className="text-gray-600 mb-6">
-              You need to be signed in to create audio clips.
-            </p>
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back to Home
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
-  }
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -308,6 +310,12 @@ export default function ClipCreatorPage() {
                     </p>
                   </div>
                 </div>
+
+                  {/* Downloaded audio listing */}
+                  <div className="mt-8 max-w-4xl mx-auto bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Downloaded audio</h3>
+                    <DownloadedAudio />
+                  </div>
               </div>
 
               {/* Download Instructions */}
@@ -415,5 +423,13 @@ export default function ClipCreatorPage() {
         />
       )}
     </main>
+  );
+}
+
+export default function ClipCreatorPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
+      <ClipCreatorContent />
+    </Suspense>
   );
 }

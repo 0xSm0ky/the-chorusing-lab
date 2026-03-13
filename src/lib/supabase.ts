@@ -5,32 +5,39 @@ import { supabaseMonitor } from "./supabase-monitor";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl) {
-  console.error("❌ Missing NEXT_PUBLIC_SUPABASE_URL environment variable");
-  throw new Error("Missing env var: NEXT_PUBLIC_SUPABASE_URL");
+// Allow local-only mode if Supabase is not configured
+const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
+
+if (!isSupabaseConfigured) {
+  console.log("⚠️  Supabase not configured - using local storage only");
+  // Create a dummy client that will fail gracefully
+  console.warn("NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are not set. Using local storage mode.");
 }
 
-if (!supabaseAnonKey) {
-  console.error(
-    "❌ Missing NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable"
-  );
-  throw new Error("Missing env var: NEXT_PUBLIC_SUPABASE_ANON_KEY");
-}
-
-// TypeScript-safe constants (we know they're strings after the checks above)
-const SUPABASE_URL: string = supabaseUrl;
-const SUPABASE_ANON_KEY: string = supabaseAnonKey;
+// TypeScript-safe constants
+const SUPABASE_URL: string = supabaseUrl || "http://localhost:54321";
+const SUPABASE_ANON_KEY: string = supabaseAnonKey || "dummy-key-for-local-mode";
 
 // Track client instance
 const clientId = supabaseMonitor.registerClient('anonymous');
 
 // Create a single supabase client for interacting with your database
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-});
+export const supabase = isSupabaseConfigured 
+  ? createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    })
+  : createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+
+// Export whether Supabase is configured for use in other modules
+export { isSupabaseConfigured };
 
 // Helper function to decode JWT payload (without signature verification)
 // This extracts user info from the token directly

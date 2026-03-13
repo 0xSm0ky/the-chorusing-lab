@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import {
   Youtube,
   Download,
@@ -363,10 +364,12 @@ export function YouTubeDownloader({ onAudioReady }: YouTubeDownloaderProps) {
           <div className="flex gap-4 p-4">
             {videoInfo.thumbnail && (
               <div className="flex-shrink-0">
-                <img
+                <Image
                   src={videoInfo.thumbnail}
                   alt={videoInfo.title}
-                  className="w-40 h-24 object-cover rounded-md"
+                  width={160}
+                  height={96}
+                  className="rounded-md object-cover"
                 />
               </div>
             )}

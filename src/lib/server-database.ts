@@ -21,22 +21,37 @@ import { retryWithBackoff, isTransientError } from "@/lib/api-utils";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    "Missing Supabase environment variables. Please check your .env.local file."
-  );
+// Allow local-only mode if Supabase is not configured
+const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
+
+if (!isSupabaseConfigured) {
+  console.log("⚠️  Supabase not configured - local storage mode only");
 }
 
 // Track server client instance
 const serverClientId = supabaseMonitor.registerClient('server');
 
+// Use dummy credentials for local mode
+const dbUrl = supabaseUrl || "http://localhost:54321";
+const dbAnonKey = supabaseAnonKey || "dummy-key-for-local-mode";
+
 // Create client for server-side operations (using anon key for now)
-const supabaseServer = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+const supabaseServer = isSupabaseConfigured 
+  ? createClient<Database>(dbUrl, dbAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    })
+  : createClient<Database>(dbUrl, dbAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
+// Export whether Supabase is configured
+export { isSupabaseConfigured };
 
 class SupabaseDatabase {
   // Helper to get authenticated client with access token
@@ -131,7 +146,7 @@ class SupabaseDatabase {
         return null;
       }
 
-      return profile.email;
+      return (profile as any).email;
     });
   }
 
@@ -148,11 +163,12 @@ class SupabaseDatabase {
         return null;
       }
 
+      const p = profile as any;
       return {
-        id: profile.id,
-        username: profile.username,
-        email: profile.email,
-        createdAt: profile.created_at,
+        id: p.id,
+        username: p.username,
+        email: p.email,
+        createdAt: p.created_at,
       };
     });
   }
@@ -170,11 +186,12 @@ class SupabaseDatabase {
         return null;
       }
 
+      const p = profile as any;
       return {
-        id: profile.id,
-        username: profile.username,
-        email: profile.email,
-        createdAt: profile.created_at,
+        id: p.id,
+        username: p.username,
+        email: p.email,
+        createdAt: p.created_at,
       };
     });
   }
@@ -268,10 +285,11 @@ class SupabaseDatabase {
       throw new Error("User profile not found");
     }
 
+    const p = profile as any;
     return {
       id: data.user.id,
-      username: profile.username,
-      email: profile.email,
+      username: p.username,
+      email: p.email,
       createdAt: data.user.created_at,
     };
   }
@@ -288,11 +306,12 @@ class SupabaseDatabase {
         return null;
       }
 
+      const p = profile as any;
       return {
-        id: profile.id,
-        username: profile.username,
-        email: profile.email,
-        createdAt: profile.created_at,
+        id: p.id,
+        username: p.username,
+        email: p.email,
+        createdAt: p.created_at,
       };
     });
   }
@@ -331,7 +350,7 @@ class SupabaseDatabase {
 
       const { data, error } = await client
         .from("audio_clips")
-        .insert(dbClip)
+        .insert(dbClip as any)
         .select()
         .single();
 
@@ -343,8 +362,9 @@ class SupabaseDatabase {
         throw new Error(`Failed to create audio clip: ${error.message}`);
       }
 
-      console.log("✅ Clip created:", data.id);
-      const convertedClip = convertAudioClipFromDb(data);
+      const d = data as any;
+      console.log("✅ Clip created:", d.id);
+      const convertedClip = convertAudioClipFromDb(d);
 
       // Convert to legacy AudioClip format for compatibility
       return {
@@ -373,7 +393,7 @@ class SupabaseDatabase {
       // Note: Using select("*") because we need all columns for conversion
       // Ensure database has indexes on: language, speaker_gender, speaker_age_range, 
       // speaker_dialect, uploaded_by, created_at, and tags (GIN index for array operations)
-      let query = client.from("audio_clips").select("*");
+      let query = (client as any).from("audio_clips").select("*");
 
     // Apply filters (order matters for query optimization - most selective first)
     if (filters) {
@@ -421,7 +441,7 @@ class SupabaseDatabase {
       }
 
       // Convert to legacy AudioClip format
-      return data.map((row) => {
+      return data.map((row: any) => {
         const converted = convertAudioClipFromDb(row);
         return {
           id: converted.id,
@@ -491,7 +511,8 @@ class SupabaseDatabase {
     }
 
     // Check if user owns this clip or is an admin
-    if (clip.uploaded_by !== userId && !isAdmin(userId)) {
+    const c = clip as any;
+    if (c.uploaded_by !== userId && !isAdmin(userId)) {
       throw new Error("Unauthorized to delete this clip");
     }
 
@@ -537,9 +558,11 @@ class SupabaseDatabase {
       const authClient = accessToken
         ? this.getAuthenticatedClient(accessToken)
         : undefined;
-      await deleteAudioFile(clip.storage_path, authClient);
+      const cp = clip as any;
+      await deleteAudioFile(cp.storage_path, authClient);
     } catch (error) {
-      console.warn(`Could not delete file ${clip.storage_path}:`, error);
+      const cp = clip as any;
+      console.warn(`Could not delete file ${cp.storage_path}:`, error);
     }
 
     return true;
@@ -582,9 +605,10 @@ class SupabaseDatabase {
     }
 
     // Check if user owns this clip or is an admin (if we have userId)
+    const c = clip as any;
     if (
       resolvedUserId &&
-      clip.uploaded_by !== resolvedUserId &&
+      c.uploaded_by !== resolvedUserId &&
       !isAdmin(resolvedUserId)
     ) {
       throw new Error("Unauthorized to update this clip");
@@ -614,7 +638,7 @@ class SupabaseDatabase {
         dbUpdates.tags = updates.metadata.tags;
     }
 
-    const { data, error } = await client
+    const { data, error } = await (client as any)
       .from("audio_clips")
       .update(dbUpdates)
       .eq("id", id)
@@ -671,7 +695,7 @@ class SupabaseDatabase {
   ): Promise<boolean> {
     const client = this.getAuthenticatedClient(accessToken);
 
-    const { error } = await client.from("clip_stars").insert({
+    const { error } = await (client as any).from("clip_stars").insert({
       clip_id: clipId,
       user_id: userId,
     });
@@ -726,7 +750,7 @@ class SupabaseDatabase {
         throw new Error(`Failed to get clip stars: ${error.message}`);
       }
 
-      return data.map((star) => star.user_id);
+      return data.map((star: any) => star.user_id);
     } catch (error: any) {
       // Handle connection errors gracefully
       if (error?.message?.includes("fetch failed") || error?.message?.includes("timeout") || error?.message?.includes("ECONNREFUSED") || error?.code === "UND_ERR_CONNECT_TIMEOUT") {
@@ -752,7 +776,7 @@ class SupabaseDatabase {
       throw new Error(`Failed to get user starred clips: ${error.message}`);
     }
 
-    return data.map((star) => star.clip_id);
+    return data.map((star: any) => star.clip_id);
   }
 
   // Batch methods for efficient querying
@@ -789,7 +813,7 @@ class SupabaseDatabase {
         }
 
         if (data) {
-          for (const star of data) {
+          for (const star of data as any[]) {
             const existing = starsMap.get(star.clip_id) || [];
             existing.push(star.user_id);
             starsMap.set(star.clip_id, existing);
@@ -824,7 +848,7 @@ class SupabaseDatabase {
       }
 
       // Use upsert to update if exists, insert if not
-      const { error } = await client
+      const { error } = await (client as any)
         .from("clip_difficulty_ratings")
         .upsert(
           {
@@ -900,10 +924,10 @@ class SupabaseDatabase {
           userId = user?.id || null;
         }
 
-        const ratings = data.map((r) => r.rating);
-        const average = ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
+        const ratings = data.map((r: any) => r.rating);
+        const average = ratings.reduce((sum: any, r: any) => sum + r, 0) / ratings.length;
         const userRating = userId
-          ? data.find((r) => r.user_id === userId)?.rating || null
+          ? (data as any[]).find((r: any) => r.user_id === userId)?.rating || null
           : null;
 
         return {
@@ -984,7 +1008,7 @@ class SupabaseDatabase {
         // Group ratings by clip_id
         const ratingsByClip = new Map<string, Array<{ rating: number; user_id: string }>>();
         if (data) {
-          for (const rating of data) {
+          for (const rating of data as any[]) {
             const existing = ratingsByClip.get(rating.clip_id) || [];
             existing.push({ rating: rating.rating, user_id: rating.user_id });
             ratingsByClip.set(rating.clip_id, existing);
@@ -995,8 +1019,8 @@ class SupabaseDatabase {
         for (const [clipId, ratings] of ratingsByClip.entries()) {
           if (ratings.length === 0) continue;
 
-          const ratingValues = ratings.map((r) => r.rating);
-          const average = ratingValues.reduce((sum, r) => sum + r, 0) / ratingValues.length;
+          const ratingValues = ratings.map((r: any) => r.rating);
+          const average = ratingValues.reduce((sum: any, r: any) => sum + r, 0) / ratingValues.length;
           const userRating = userId
             ? ratings.find((r) => r.user_id === userId)?.rating || null
             : null;
@@ -1051,7 +1075,7 @@ class SupabaseDatabase {
             clip_id: clipId,
             user_id: userId,
             vote_type: voteType,
-          },
+          } as any,
           {
             onConflict: "clip_id,user_id",
           }
@@ -1116,11 +1140,11 @@ class SupabaseDatabase {
           userId = user?.id || null;
         }
 
-        const upvoteCount = data.filter((v) => v.vote_type === "up").length;
-        const downvoteCount = data.filter((v) => v.vote_type === "down").length;
+        const upvoteCount = (data as any[]).filter((v: any) => v.vote_type === "up").length;
+        const downvoteCount = (data as any[]).filter((v: any) => v.vote_type === "down").length;
         const voteScore = upvoteCount - downvoteCount;
         const userVote = userId
-          ? (data.find((v) => v.user_id === userId)?.vote_type as "up" | "down" | null) || null
+          ? ((data as any[]).find((v: any) => v.user_id === userId)?.vote_type as "up" | "down" | null) || null
           : null;
 
         return {
@@ -1200,17 +1224,17 @@ class SupabaseDatabase {
         // Group votes by clip_id
         const votesByClip = new Map<string, Array<{ vote_type: string; user_id: string }>>();
         if (data) {
-          for (const vote of data) {
-            const existing = votesByClip.get(vote.clip_id) || [];
-            existing.push({ vote_type: vote.vote_type, user_id: vote.user_id });
-            votesByClip.set(vote.clip_id, existing);
+          for (const vote of (data as any[])) {
+            const existing = votesByClip.get((vote as any).clip_id) || [];
+            existing.push({ vote_type: (vote as any).vote_type, user_id: (vote as any).user_id });
+            votesByClip.set((vote as any).clip_id, existing);
           }
         }
 
         // Calculate vote counts and user votes
         for (const [clipId, votes] of votesByClip.entries()) {
-          const upvoteCount = votes.filter((v) => v.vote_type === "up").length;
-          const downvoteCount = votes.filter((v) => v.vote_type === "down").length;
+          const upvoteCount = votes.filter((v: any) => v.vote_type === "up").length;
+          const downvoteCount = votes.filter((v: any) => v.vote_type === "down").length;
           const voteScore = upvoteCount - downvoteCount;
           const userVote = userId
             ? (votes.find((v) => v.user_id === userId)?.vote_type as "up" | "down" | null) || null
@@ -1308,13 +1332,13 @@ class SupabaseDatabase {
       throw new Error(`Failed to get user filter preferences: ${error.message}`);
     }
 
-    if (!data || !data.filter_preferences) {
+    if (!data || !(data as any).filter_preferences) {
       return null;
     }
 
     // Parse JSONB and validate structure
     try {
-      const preferences = data.filter_preferences as any;
+      const preferences = (data as any).filter_preferences as any;
       // Validate and return only the expected fields
       const result: FilterPreferences = {};
       if (preferences.language && typeof preferences.language === "string") {
@@ -1378,7 +1402,7 @@ class SupabaseDatabase {
 
     // Handle null preferences (clearing them)
     if (!preferences) {
-      const { error } = await client
+      const { error } = await (client as any)
         .from("profiles")
         .update({ filter_preferences: null })
         .eq("id", userId);
@@ -1414,7 +1438,7 @@ class SupabaseDatabase {
     const valueToSave =
       Object.keys(preferencesToSave).length > 0 ? preferencesToSave : null;
 
-    const { error } = await client
+    const { error } = await (client as any)
       .from("profiles")
       .update({ filter_preferences: valueToSave })
       .eq("id", userId);

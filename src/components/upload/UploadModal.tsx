@@ -89,15 +89,25 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   
-  // Load basic settings from sessionStorage on mount
+  // Load basic settings from sessionStorage on mount (client-only)
   const loadBasicSettings = (): BasicSettings => {
     try {
+      if (typeof sessionStorage === 'undefined') {
+        return {
+          language: '',
+          speakerGender: '',
+          speakerAgeRange: '',
+          speakerDialect: '',
+          sourceUrl: '',
+        };
+      }
       const stored = sessionStorage.getItem(STORAGE_KEY);
       if (stored) {
         return JSON.parse(stored);
       }
     } catch (error) {
-      console.error('Failed to load basic settings from sessionStorage:', error);
+      // safe to ignore on server
+      console.debug('Failed to load basic settings from sessionStorage:', error);
     }
     return {
       language: '',
@@ -107,8 +117,6 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
       sourceUrl: '',
     };
   };
-
-  const basicSettings = loadBasicSettings();
 
   // Validate and cast speakerGender to the expected type
   const getValidSpeakerGender = (value: string): 'male' | 'female' | 'other' | '' => {
@@ -129,14 +137,26 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
   const [formData, setFormData] = useState<UploadFormData>({
     title: '',
     duration: '',
-    language: basicSettings.language || '',
-    speakerGender: getValidSpeakerGender(basicSettings.speakerGender || ''),
-    speakerAgeRange: getValidSpeakerAgeRange(basicSettings.speakerAgeRange || ''),
-    speakerDialect: basicSettings.speakerDialect || '',
+    language: '',
+    speakerGender: '',
+    speakerAgeRange: '',
+    speakerDialect: '',
     transcript: '',
-    sourceUrl: basicSettings.sourceUrl || '',
+    sourceUrl: '',
     tags: '',
   });
+
+  useEffect(() => {
+    const stored = loadBasicSettings();
+    setFormData((prev) => ({
+      ...prev,
+      language: stored.language || '',
+      speakerGender: getValidSpeakerGender(stored.speakerGender || ''),
+      speakerAgeRange: getValidSpeakerAgeRange(stored.speakerAgeRange || ''),
+      speakerDialect: stored.speakerDialect || '',
+      sourceUrl: stored.sourceUrl || '',
+    }));
+  }, []);
 
   const validateFile = (file: File): string | null => {
     // Check file size
