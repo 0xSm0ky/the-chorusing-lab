@@ -20,7 +20,7 @@ export function ClipImportExportModal({
   onImportSuccess,
 }: ClipImportExportModalProps) {
   const [activeTab, setActiveTab] = useState<'export' | 'import'>('export');
-  const [exportFormat, setExportFormat] = useState<'zip' | 'json'>('zip');
+  const [exportFormat] = useState<'zip'>('zip');
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,14 +37,13 @@ export function ClipImportExportModal({
     setMessage(null);
 
     try {
-      const clipIds = clipsToExport.map(c => c.id);
+  const clipIds = clipsToExport.map(c => c.id);
 
-      // Build query string with multiple clipIds values
-      const params = new URLSearchParams();
-      params.append('format', exportFormat);
-      clipIds.forEach(id => params.append('clipIds', id));
+  // Build query string with multiple clipIds values
+  const params = new URLSearchParams();
+  clipIds.forEach(id => params.append('clipIds', id));
 
-      const response = await fetch(`/api/clips/import-export?${params.toString()}`);
+  const response = await fetch(`/api/clips/import-export?${params.toString()}`);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -178,33 +177,18 @@ export function ClipImportExportModal({
               </p>
 
               <div className="space-y-3">
-                <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+                <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
                   <input
                     type="radio"
                     name="format"
                     value="zip"
-                    checked={exportFormat === 'zip'}
-                    onChange={() => setExportFormat('zip')}
+                    checked
+                    readOnly
                     className="w-4 h-4 text-indigo-600"
                   />
                   <div>
                     <p className="font-medium text-gray-900">ZIP (with audio)</p>
                     <p className="text-xs text-gray-500">Includes all audio files</p>
-                  </div>
-                </label>
-
-                <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="json"
-                    checked={exportFormat === 'json'}
-                    onChange={() => setExportFormat('json')}
-                    className="w-4 h-4 text-indigo-600"
-                  />
-                  <div>
-                    <p className="font-medium text-gray-900">JSON (metadata only)</p>
-                    <p className="text-xs text-gray-500">Metadata only, no audio files</p>
                   </div>
                 </label>
               </div>
@@ -230,14 +214,14 @@ export function ClipImportExportModal({
           ) : (
             <>
               <p className="text-sm text-gray-600">
-                Upload a previously exported clips file (.zip or .json) to restore your clips.
+                Upload a previously exported clips ZIP file to restore your clips.
               </p>
 
               <label className="block">
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".zip,.json"
+                  accept=".zip"
                   onChange={handleImport}
                   disabled={importing}
                   className="hidden"
@@ -248,7 +232,7 @@ export function ClipImportExportModal({
                     {importing ? 'Importing...' : 'Click to upload or drag file'}
                   </p>
                   <p className="text-xs text-gray-500">
-                    ZIP or JSON files only
+                    ZIP files only
                   </p>
                 </div>
               </label>

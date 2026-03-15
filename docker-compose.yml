@@ -8,3 +8,4 @@ services:
       - .env.local
     volumes:
       - ./local-data:/app/local-data
+      - ./youtube-cookies.txt:/app/youtube-cookies.txt

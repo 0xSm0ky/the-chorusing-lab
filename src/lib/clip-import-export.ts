@@ -228,10 +228,77 @@ export async function importClipsFromZip(
 
     if (!manifest) {
       console.error('❌ No valid manifest found in ZIP');
-      const allFiles = fs.readdirSync(tempDir, { recursive: true });
-      console.error('All files in ZIP:', allFiles);
-      errors.push('Invalid export file: no manifest.json or clips.json found');
-      return { success: false, importedCount: 0, errors };
+
+      // New behavior: support ZIPs that only contain audio files by
+      // auto-generating a simple manifest from the audio directory.
+      const audioDir = path.join(tempDir, 'audio');
+      let audioFiles: string[] = [];
+
+      if (fs.existsSync(audioDir) && fs.statSync(audioDir).isDirectory()) {
+        audioFiles = fs.readdirSync(audioDir).filter((name) => {
+          const lower = name.toLowerCase();
+          return (
+            lower.endsWith('.mp3') ||
+            lower.endsWith('.wav') ||
+            lower.endsWith('.m4a') ||
+            lower.endsWith('.ogg')
+          );
+        });
+      } else {
+        // Fall back to scanning root of tempDir for audio files
+        audioFiles = fs.readdirSync(tempDir).filter((name) => {
+          const lower = name.toLowerCase();
+          return (
+            lower.endsWith('.mp3') ||
+            lower.endsWith('.wav') ||
+            lower.endsWith('.m4a') ||
+            lower.endsWith('.ogg')
+          );
+        });
+      }
+
+      if (audioFiles.length === 0) {
+        const allFiles = fs.readdirSync(tempDir, { recursive: true } as any);
+        console.error('All files in ZIP:', allFiles);
+        errors.push('Invalid export file: no manifest.json/clips.json or audio files found');
+        return { success: false, importedCount: 0, errors };
+      }
+
+      console.log('📥 No manifest found, auto-creating clips from audio files:', audioFiles);
+
+      manifest = {
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        clipCount: audioFiles.length,
+        clips: audioFiles.map((audioFilename) => {
+          const baseTitle = path.basename(audioFilename, path.extname(audioFilename));
+          const clip: any = {
+            title: baseTitle,
+            duration: 0,
+            filename: audioFilename,
+            originalFilename: audioFilename,
+            fileSize: 0,
+            metadata: {
+              language: 'unknown',
+              speakerGender: 'other',
+              speakerAgeRange: 'adult',
+              speakerDialect: 'unknown',
+              transcript: '',
+              sourceUrl: '',
+              tags: [],
+            },
+          };
+
+          return {
+            clip,
+            audioFilename,
+          };
+        }),
+      };
+
+      console.log('✅ Auto-generated manifest from audio files:', {
+        clipCount: manifest.clipCount,
+      });
     }
 
     // Validate manifest structure

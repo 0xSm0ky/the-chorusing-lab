@@ -85,6 +85,36 @@ export async function GET(request: NextRequest) {
     console.error("yt-dlp metadata error:", error);
     const stderr = error.stderr || error.message || "";
     
+    // If we got a bot error with cookies, try again WITHOUT cookies
+    if (isBotError(stderr) && fs.existsSync(COOKIES_PATH)) {
+      console.log("Retrying without cookies due to bot detection...");
+      try {
+        const nodePath = process.execPath || "/usr/bin/node";
+        const ytdlpNoAuth = `yt-dlp --js-runtimes "node:${nodePath}" --remote-components ejs:github`;
+        const { stdout } = await execAsync(
+          `${ytdlpNoAuth} --no-download --print "%(title)s" --print "%(duration)s" --print "%(thumbnail)s" --print "%(id)s" ${JSON.stringify(url)}`,
+          { timeout: 30000 }
+        );
+
+        const lines = stdout.trim().split("\n");
+        const title = lines[0] || "Unknown";
+        const duration = parseFloat(lines[1]) || 0;
+        const thumbnail = lines[2] || "";
+        const videoId = lines[3] || "";
+
+        return NextResponse.json({
+          title,
+          duration,
+          thumbnail,
+          videoId,
+          url,
+        });
+      } catch (retryError: any) {
+        console.error("yt-dlp retry without cookies failed:", retryError);
+        // Fall through to original error handling
+      }
+    }
+    
     if (isBotError(stderr)) {
       const hasCookies = fs.existsSync(COOKIES_PATH);
       return NextResponse.json(
@@ -130,10 +160,30 @@ export async function POST(request: NextRequest) {
     // Download audio only, convert to mp3
     console.log(`📥 yt-dlp: Downloading audio from ${url}`);
     // Disable yt-dlp progress lines to keep server logs clean
-    const { stdout, stderr } = await execAsync(
-      `${ytdlp} --no-progress -x --audio-format mp3 --audio-quality 0 -o ${JSON.stringify(outputTemplate)} --no-playlist --max-filesize 100M ${JSON.stringify(url)}`,
-      { timeout: 300000 } // 5 minute timeout for longer videos
-    );
+    let downloadResult;
+    try {
+      downloadResult = await execAsync(
+        `${ytdlp} --no-progress -x --audio-format mp3 --audio-quality 0 -o ${JSON.stringify(outputTemplate)} --no-playlist --max-filesize 100M ${JSON.stringify(url)}`,
+        { timeout: 300000 } // 5 minute timeout for longer videos
+      );
+    } catch (downloadError: any) {
+      const stderr = downloadError.stderr || downloadError.message || "";
+      
+      // If we got a bot error with cookies, try again WITHOUT cookies
+      if (isBotError(stderr) && fs.existsSync(COOKIES_PATH)) {
+        console.log("Retrying download without cookies due to bot detection...");
+        const nodePath = process.execPath || "/usr/bin/node";
+        const ytdlpNoAuth = `yt-dlp --js-runtimes "node:${nodePath}" --remote-components ejs:github`;
+        downloadResult = await execAsync(
+          `${ytdlpNoAuth} --no-progress -x --audio-format mp3 --audio-quality 0 -o ${JSON.stringify(outputTemplate)} --no-playlist --max-filesize 100M ${JSON.stringify(url)}`,
+          { timeout: 300000 }
+        );
+      } else {
+        throw downloadError;
+      }
+    }
+
+    const { stdout, stderr } = downloadResult;
 
     // Only log short summaries, not progress spamming
     if (stdout && stdout.length < 2000) console.log("yt-dlp stdout:", stdout);
