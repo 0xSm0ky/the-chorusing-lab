@@ -282,7 +282,7 @@ export async function GET(request: NextRequest) {
     const output = fs.createWriteStream(tempFile);
     const archive = archiver('zip', { zlib: { level: 9 } });
 
-    return new Promise((resolve) => {
+    return new Promise<Response>((resolve) => {
       output.on('close', async () => {
         console.log('✅ ZIP file created successfully');
 
